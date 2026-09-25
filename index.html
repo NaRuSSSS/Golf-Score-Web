@@ -125,7 +125,6 @@
 
                     if (result.success) {
                         const parsedData = result.data;
-                        // 동반자 칸을 무조건 기본 3명으로 세팅 (빈칸으로 채움)
                         if (!parsedData.partners) parsedData.partners = [];
                         while (parsedData.partners.length < 3) {
                             parsedData.partners.push({ name: "", score: Array(18).fill("") });
@@ -166,7 +165,6 @@
                 setErrorMsg("");
             };
 
-            // 배열 데이터 수정 핸들러
             const handleArrayChange = (key, index, value) => {
                 setAnalyzedData(prev => {
                     const newArr = [...(prev[key] || Array(18).fill(""))];
@@ -175,7 +173,6 @@
                 });
             };
 
-            // 동반자 데이터 수정 핸들러
             const handlePartnerChange = (pIdx, key, index, value) => {
                 setAnalyzedData(prev => {
                     const newPartners = [...(prev.partners || [])];
@@ -220,9 +217,6 @@
                     setIsSaving(false);
                 }
             };
-
-            // 테이블 렌더링에 사용되는 열 스타일 헬퍼 (9번과 10번 홀 사이 굵은 줄 표시)
-            const getBorderClass = (i) => i === 8 ? 'border-r-2 border-gray-300' : 'border-r';
 
             return (
                 <div className="animate-fade-in p-2 md:p-8 max-w-6xl mx-auto pb-20">
@@ -324,18 +318,18 @@
                                         </div>
                                     </div>
 
-                                    {/* 스코어 테이블 검수 영역 (GIR 행 제거됨) */}
+                                    {/* 스코어 테이블 검수 영역 (전체 테두리 균일화 적용) */}
                                     <div className="overflow-x-auto rounded-xl border border-gray-200 shadow-sm">
                                         <table className="w-full text-center text-xs whitespace-nowrap">
                                             <thead className="bg-slate-50 text-slate-500 uppercase tracking-wider">
                                                 <tr>
                                                     <th rowSpan="2" className="p-2 border-r border-b w-20 align-middle">구분</th>
-                                                    <th colSpan="9" className="p-1.5 border-r-2 border-gray-300 border-b bg-gray-100 text-gray-600 font-bold">전반</th>
+                                                    <th colSpan="9" className="p-1.5 border-r border-b bg-gray-100 text-gray-600 font-bold">전반</th>
                                                     <th colSpan="9" className="p-1.5 border-b bg-gray-100 text-gray-600 font-bold">후반</th>
                                                 </tr>
                                                 <tr>
                                                     {[1,2,3,4,5,6,7,8,9, 1,2,3,4,5,6,7,8,9].map((h, i) => (
-                                                        <th key={i} className={`p-2 border-b w-10 bg-white ${getBorderClass(i)}`}>{h}</th>
+                                                        <th key={i} className="p-2 border-r border-b w-10 bg-white">{h}</th>
                                                     ))}
                                                 </tr>
                                             </thead>
@@ -343,37 +337,37 @@
                                                 <tr>
                                                     <td className="p-2 border-r border-b font-bold bg-slate-100 text-gray-600">Par</td>
                                                     {analyzedData.par?.map((val, i) => (
-                                                        <td key={i} className={`p-1 border-b ${getBorderClass(i)}`}><input type="text" value={val || ""} onChange={(e) => handleArrayChange('par', i, e.target.value)} className="w-full py-1 text-center bg-transparent outline-none font-medium" /></td>
+                                                        <td key={i} className="p-1 border-r border-b"><input type="text" value={val || ""} onChange={(e) => handleArrayChange('par', i, e.target.value)} className="w-full py-1 text-center bg-transparent outline-none font-medium" /></td>
                                                     ))}
                                                 </tr>
                                                 <tr>
                                                     <td className="p-2 border-r border-b font-bold bg-blue-50 text-blue-600">타수</td>
                                                     {analyzedData.myScore?.map((val, i) => (
-                                                        <td key={i} className={`p-1 border-b bg-blue-50/30 ${getBorderClass(i)}`}><input type="text" value={val || ""} onChange={(e) => handleArrayChange('myScore', i, e.target.value)} className="w-full py-1 text-center bg-transparent outline-none font-bold text-blue-700" /></td>
+                                                        <td key={i} className="p-1 border-r border-b bg-blue-50/30"><input type="text" value={val || ""} onChange={(e) => handleArrayChange('myScore', i, e.target.value)} className="w-full py-1 text-center bg-transparent outline-none font-bold text-blue-700" /></td>
                                                     ))}
                                                 </tr>
                                                 <tr>
                                                     <td className="p-2 border-r border-b font-bold text-gray-600">퍼트</td>
                                                     {analyzedData.putts?.map((val, i) => (
-                                                        <td key={i} className={`p-1 border-b ${getBorderClass(i)}`}><input type="text" value={val || ""} onChange={(e) => handleArrayChange('putts', i, e.target.value)} className="w-full py-1 text-center bg-transparent outline-none font-medium" /></td>
+                                                        <td key={i} className="p-1 border-r border-b"><input type="text" value={val || ""} onChange={(e) => handleArrayChange('putts', i, e.target.value)} className="w-full py-1 text-center bg-transparent outline-none font-medium" /></td>
                                                     ))}
                                                 </tr>
                                                 <tr>
                                                     <td className="p-2 border-r border-b font-bold text-gray-600">F/W</td>
                                                     {analyzedData.fw?.map((val, i) => (
-                                                        <td key={i} className={`p-1 border-b ${getBorderClass(i)}`}><input type="text" value={val || ""} onChange={(e) => handleArrayChange('fw', i, e.target.value)} className="w-full py-1 text-center bg-transparent outline-none font-bold text-emerald-600" maxLength={1} /></td>
+                                                        <td key={i} className="p-1 border-r border-b"><input type="text" value={val || ""} onChange={(e) => handleArrayChange('fw', i, e.target.value)} className="w-full py-1 text-center bg-transparent outline-none font-bold text-emerald-600" maxLength={1} /></td>
                                                     ))}
                                                 </tr>
                                                 <tr>
                                                     <td className="p-2 border-r border-b font-bold text-gray-600">벌타</td>
                                                     {analyzedData.penalty?.map((val, i) => (
-                                                        <td key={i} className={`p-1 border-b ${getBorderClass(i)}`}><input type="text" value={val || ""} onChange={(e) => handleArrayChange('penalty', i, e.target.value)} className="w-full py-1 text-center bg-transparent outline-none font-bold text-red-500" /></td>
+                                                        <td key={i} className="p-1 border-r border-b"><input type="text" value={val || ""} onChange={(e) => handleArrayChange('penalty', i, e.target.value)} className="w-full py-1 text-center bg-transparent outline-none font-bold text-red-500" /></td>
                                                     ))}
                                                 </tr>
                                                 <tr>
                                                     <td className="p-2 border-r border-b font-bold text-gray-600">벙커</td>
                                                     {analyzedData.sand?.map((val, i) => (
-                                                        <td key={i} className={`p-1 border-b ${getBorderClass(i)}`}><input type="text" value={val || ""} onChange={(e) => handleArrayChange('sand', i, e.target.value)} className="w-full py-1 text-center bg-transparent outline-none font-bold text-yellow-600" /></td>
+                                                        <td key={i} className="p-1 border-r border-b"><input type="text" value={val || ""} onChange={(e) => handleArrayChange('sand', i, e.target.value)} className="w-full py-1 text-center bg-transparent outline-none font-bold text-yellow-600" /></td>
                                                     ))}
                                                 </tr>
                                                 
@@ -384,7 +378,7 @@
                                                             <input type="text" value={partner.name || ""} onChange={(e) => handlePartnerChange(pIdx, 'name', null, e.target.value)} className="w-full py-1 text-center bg-transparent outline-none font-bold placeholder-indigo-300" placeholder={`동반자 ${pIdx + 1}`} />
                                                         </td>
                                                         {partner.score?.map((val, i) => (
-                                                            <td key={`p-${pIdx}-${i}`} className={`p-1 border-b bg-indigo-50/30 ${getBorderClass(i)}`}>
+                                                            <td key={`p-${pIdx}-${i}`} className="p-1 border-r border-b bg-indigo-50/30">
                                                                 <input type="text" value={val || ""} onChange={(e) => handlePartnerChange(pIdx, 'score', i, e.target.value)} className="w-full py-1 text-center bg-transparent outline-none font-bold text-indigo-700" />
                                                             </td>
                                                         ))}
