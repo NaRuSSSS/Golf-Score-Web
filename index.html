@@ -354,6 +354,7 @@
                         </div>
                     </div>
 
+                    {/* 실시간 검수 및 편집 테이블 (AI 판독 후 노출) */}
                     {editableData && (
                         <div className="bg-white rounded-3xl shadow-sm border border-gray-100 p-5 md:p-6 space-y-5 animate-fade-in">
                             <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 border-b border-gray-100 pb-4">
@@ -380,48 +381,23 @@
                             <div className="grid grid-cols-2 sm:grid-cols-5 gap-3 bg-gray-50/80 p-3.5 rounded-2xl border border-gray-200/60 text-xs">
                                 <div>
                                     <label className="text-[10px] text-gray-400 font-bold block mb-1">일시</label>
-                                    <input 
-                                        type="date" 
-                                        className="w-full bg-white border border-gray-200 rounded-lg px-2 py-1 font-semibold text-gray-800 text-xs" 
-                                        value={editableData.date} 
-                                        onChange={(e) => updateField('date', null, e.target.value)} 
-                                    />
+                                    <input type="date" className="w-full bg-white border border-gray-200 rounded-lg px-2 py-1 font-semibold text-gray-800 text-xs" value={editableData.date} onChange={(e) => updateField('date', null, e.target.value)} />
                                 </div>
                                 <div>
                                     <label className="text-[10px] text-gray-400 font-bold block mb-1">시간</label>
-                                    <input 
-                                        type="text" 
-                                        className="w-full bg-white border border-gray-200 rounded-lg px-2 py-1 font-semibold text-gray-800 text-xs" 
-                                        value={editableData.time} 
-                                        onChange={(e) => updateField('time', null, e.target.value)} 
-                                    />
+                                    <input type="text" className="w-full bg-white border border-gray-200 rounded-lg px-2 py-1 font-semibold text-gray-800 text-xs" value={editableData.time} onChange={(e) => updateField('time', null, e.target.value)} />
                                 </div>
                                 <div>
                                     <label className="text-[10px] text-gray-400 font-bold block mb-1">골프장 명</label>
-                                    <input 
-                                        type="text" 
-                                        className="w-full bg-white border border-gray-200 rounded-lg px-2 py-1 font-bold text-gray-800 text-xs" 
-                                        value={editableData.course} 
-                                        onChange={(e) => updateField('course', null, e.target.value)} 
-                                    />
+                                    <input type="text" className="w-full bg-white border border-gray-200 rounded-lg px-2 py-1 font-bold text-gray-800 text-xs" value={editableData.course} onChange={(e) => updateField('course', null, e.target.value)} />
                                 </div>
                                 <div>
                                     <label className="text-[10px] text-gray-400 font-bold block mb-1">전반 코스</label>
-                                    <input 
-                                        type="text" 
-                                        className="w-full bg-white border border-gray-200 rounded-lg px-2 py-1 font-semibold text-gray-800 text-xs" 
-                                        value={editableData.frontNineName} 
-                                        onChange={(e) => updateField('frontNineName', null, e.target.value)} 
-                                    />
+                                    <input type="text" className="w-full bg-white border border-gray-200 rounded-lg px-2 py-1 font-semibold text-gray-800 text-xs" value={editableData.frontNineName} onChange={(e) => updateField('frontNineName', null, e.target.value)} />
                                 </div>
                                 <div>
                                     <label className="text-[10px] text-gray-400 font-bold block mb-1">후반 코스</label>
-                                    <input 
-                                        type="text" 
-                                        className="w-full bg-white border border-gray-200 rounded-lg px-2 py-1 font-semibold text-gray-800 text-xs" 
-                                        value={editableData.backNineName} 
-                                        onChange={(e) => updateField('backNineName', null, e.target.value)} 
-                                    />
+                                    <input type="text" className="w-full bg-white border border-gray-200 rounded-lg px-2 py-1 font-semibold text-gray-800 text-xs" value={editableData.backNineName} onChange={(e) => updateField('backNineName', null, e.target.value)} />
                                 </div>
                             </div>
 
@@ -441,15 +417,11 @@
                                         <tr className="hover:bg-gray-50/50">
                                             <td className="p-1.5 border-r font-bold text-gray-500 text-left pl-3 bg-gray-50">정규 타수</td>
                                             {editableData.par.slice(0, 9).map((p, i) => (
-                                                <td key={`par-f-${i}`} className="p-0.5 border-r">
-                                                    <input type="number" className="w-7 text-center rounded bg-gray-50 font-semibold text-gray-700" value={p} onChange={(e) => updateField('par', i, e.target.value)} />
-                                                </td>
+                                                <td key={`par-f-${i}`} className="p-0.5 border-r"><input type="number" className="w-7 text-center rounded bg-gray-50 font-semibold text-gray-700" value={p} onChange={(e) => updateField('par', i, e.target.value)} /></td>
                                             ))}
                                             <td className="border-r bg-emerald-50/50 font-bold text-emerald-800">{editableData.par.slice(0, 9).reduce((a,b)=>a+(Number(b)||0),0)}</td>
                                             {editableData.par.slice(9, 18).map((p, i) => (
-                                                <td key={`par-b-${i}`} className="p-0.5 border-r">
-                                                    <input type="number" className="w-7 text-center rounded bg-gray-50 font-semibold text-gray-700" value={p} onChange={(e) => updateField('par', i + 9, e.target.value)} />
-                                                </td>
+                                                <td key={`par-b-${i}`} className="p-0.5 border-r"><input type="number" className="w-7 text-center rounded bg-gray-50 font-semibold text-gray-700" value={p} onChange={(e) => updateField('par', i + 9, e.target.value)} /></td>
                                             ))}
                                             <td className="border-r bg-blue-50/50 font-bold text-blue-800">{editableData.par.slice(9, 18).reduce((a,b)=>a+(Number(b)||0),0)}</td>
                                             <td className="bg-indigo-50/50 font-black text-indigo-800">{editableData.par.reduce((a,b)=>a+(Number(b)||0),0)}</td>
@@ -458,17 +430,13 @@
                                         <tr className="bg-yellow-50/20 hover:bg-yellow-50/40">
                                             <td className="p-1.5 border-r font-black text-blue-700 text-left pl-3 bg-yellow-50/60">송봉근 (상대타수)</td>
                                             {editableData.myScore.slice(0, 9).map((s, i) => (
-                                                <td key={`mys-f-${i}`} className="p-0.5 border-r">
-                                                    <input type="number" className="w-7 text-center rounded border border-blue-200 font-black text-blue-600 bg-white" value={s} onChange={(e) => updateField('myScore', i, e.target.value)} />
-                                                </td>
+                                                <td key={`mys-f-${i}`} className="p-0.5 border-r"><input type="number" className="w-7 text-center rounded border border-blue-200 font-black text-blue-600 bg-white" value={s} onChange={(e) => updateField('myScore', i, e.target.value)} /></td>
                                             ))}
                                             <td className="border-r bg-emerald-100/50 font-black text-blue-700">
                                                 {editableData.par.slice(0, 9).reduce((acc, p, idx) => acc + p + (Number(editableData.myScore[idx]) || 0), 0)}
                                             </td>
                                             {editableData.myScore.slice(9, 18).map((s, i) => (
-                                                <td key={`mys-b-${i}`} className="p-0.5 border-r">
-                                                    <input type="number" className="w-7 text-center rounded border border-blue-200 font-black text-blue-600 bg-white" value={s} onChange={(e) => updateField('myScore', i + 9, e.target.value)} />
-                                                </td>
+                                                <td key={`mys-b-${i}`} className="p-0.5 border-r"><input type="number" className="w-7 text-center rounded border border-blue-200 font-black text-blue-600 bg-white" value={s} onChange={(e) => updateField('myScore', i + 9, e.target.value)} /></td>
                                             ))}
                                             <td className="border-r bg-blue-100/50 font-black text-blue-700">
                                                 {editableData.par.slice(9, 18).reduce((acc, p, idx) => acc + p + (Number(editableData.myScore[idx + 9]) || 0), 0)}
@@ -481,15 +449,11 @@
                                         <tr className="hover:bg-gray-50/50">
                                             <td className="p-1.5 border-r font-bold text-orange-600 text-left pl-3 bg-gray-50">Putts</td>
                                             {editableData.putts.slice(0, 9).map((pt, i) => (
-                                                <td key={`pt-f-${i}`} className="p-0.5 border-r">
-                                                    <input type="number" className="w-7 text-center rounded border border-orange-200 font-semibold text-orange-600 bg-white" value={pt} onChange={(e) => updateField('putts', i, e.target.value)} />
-                                                </td>
+                                                <td key={`pt-f-${i}`} className="p-0.5 border-r"><input type="number" className="w-7 text-center rounded border border-orange-200 font-semibold text-orange-600 bg-white" value={pt} onChange={(e) => updateField('putts', i, e.target.value)} /></td>
                                             ))}
                                             <td className="border-r bg-emerald-50/50 font-bold text-orange-600">{editableData.putts.slice(0, 9).reduce((a,b)=>a+(Number(b)||0),0)}</td>
                                             {editableData.putts.slice(9, 18).map((pt, i) => (
-                                                <td key={`pt-b-${i}`} className="p-0.5 border-r">
-                                                    <input type="number" className="w-7 text-center rounded border border-orange-200 font-semibold text-orange-600 bg-white" value={pt} onChange={(e) => updateField('putts', i + 9, e.target.value)} />
-                                                </td>
+                                                <td key={`pt-b-${i}`} className="p-0.5 border-r"><input type="number" className="w-7 text-center rounded border border-orange-200 font-semibold text-orange-600 bg-white" value={pt} onChange={(e) => updateField('putts', i + 9, e.target.value)} /></td>
                                             ))}
                                             <td className="border-r bg-blue-50/50 font-bold text-orange-600">{editableData.putts.slice(9, 18).reduce((a,b)=>a+(Number(b)||0),0)}</td>
                                             <td className="bg-indigo-50/50 font-black text-orange-600">{editableData.putts.reduce((a,b)=>a+(Number(b)||0),0)}</td>
@@ -498,15 +462,11 @@
                                         <tr className="hover:bg-gray-50/50">
                                             <td className="p-1.5 border-r font-bold text-teal-600 text-left pl-3 bg-gray-50">FW (1/0)</td>
                                             {editableData.fw.slice(0, 9).map((f, i) => (
-                                                <td key={`fw-f-${i}`} className="p-0.5 border-r">
-                                                    <input type="text" maxLength={1} className="w-7 text-center rounded border border-gray-200 font-bold text-teal-600 bg-white" value={f} onChange={(e) => updateField('fw', i, e.target.value)} />
-                                                </td>
+                                                <td key={`fw-f-${i}`} className="p-0.5 border-r"><input type="text" maxLength={1} className="w-7 text-center rounded border border-gray-200 font-bold text-teal-600 bg-white" value={f} onChange={(e) => updateField('fw', i, e.target.value)} /></td>
                                             ))}
                                             <td className="border-r bg-emerald-50/30 text-gray-300">-</td>
                                             {editableData.fw.slice(9, 18).map((f, i) => (
-                                                <td key={`fw-b-${i}`} className="p-0.5 border-r">
-                                                    <input type="text" maxLength={1} className="w-7 text-center rounded border border-gray-200 font-bold text-teal-600 bg-white" value={f} onChange={(e) => updateField('fw', i + 9, e.target.value)} />
-                                                </td>
+                                                <td key={`fw-b-${i}`} className="p-0.5 border-r"><input type="text" maxLength={1} className="w-7 text-center rounded border border-gray-200 font-bold text-teal-600 bg-white" value={f} onChange={(e) => updateField('fw', i + 9, e.target.value)} /></td>
                                             ))}
                                             <td className="border-r bg-blue-50/30 text-gray-300">-</td>
                                             <td className="bg-indigo-50/30 text-gray-300">-</td>
@@ -515,15 +475,11 @@
                                         <tr className="hover:bg-gray-50/50">
                                             <td className="p-1.5 border-r font-bold text-red-500 text-left pl-3 bg-gray-50">Panelty</td>
                                             {editableData.penalty.slice(0, 9).map((pn, i) => (
-                                                <td key={`pn-f-${i}`} className="p-0.5 border-r">
-                                                    <input type="number" className="w-7 text-center rounded border border-red-200 font-bold text-red-500 bg-white" value={pn || ''} onChange={(e) => updateField('penalty', i, e.target.value)} />
-                                                </td>
+                                                <td key={`pn-f-${i}`} className="p-0.5 border-r"><input type="number" className="w-7 text-center rounded border border-red-200 font-bold text-red-500 bg-white" value={pn || ''} onChange={(e) => updateField('penalty', i, e.target.value)} /></td>
                                             ))}
                                             <td className="border-r bg-emerald-50/50 font-bold text-red-500">{editableData.penalty.slice(0, 9).reduce((a,b)=>a+(Number(b)||0),0) || ''}</td>
                                             {editableData.penalty.slice(9, 18).map((pn, i) => (
-                                                <td key={`pn-b-${i}`} className="p-0.5 border-r">
-                                                    <input type="number" className="w-7 text-center rounded border border-red-200 font-bold text-red-500 bg-white" value={pn || ''} onChange={(e) => updateField('penalty', i + 9, e.target.value)} />
-                                                </td>
+                                                <td key={`pn-b-${i}`} className="p-0.5 border-r"><input type="number" className="w-7 text-center rounded border border-red-200 font-bold text-red-500 bg-white" value={pn || ''} onChange={(e) => updateField('penalty', i + 9, e.target.value)} /></td>
                                             ))}
                                             <td className="border-r bg-blue-50/50 font-bold text-red-500">{editableData.penalty.slice(9, 18).reduce((a,b)=>a+(Number(b)||0),0) || ''}</td>
                                             <td className="bg-indigo-50/50 font-black text-red-600">{editableData.penalty.reduce((a,b)=>a+(Number(b)||0),0) || ''}</td>
@@ -532,15 +488,11 @@
                                         <tr className="hover:bg-gray-50/50">
                                             <td className="p-1.5 border-r font-bold text-yellow-600 text-left pl-3 bg-gray-50">Bunker</td>
                                             {editableData.sand.slice(0, 9).map((bk, i) => (
-                                                <td key={`bk-f-${i}`} className="p-0.5 border-r">
-                                                    <input type="number" className="w-7 text-center rounded border border-yellow-200 font-bold text-yellow-600 bg-white" value={bk || ''} onChange={(e) => updateField('sand', i, e.target.value)} />
-                                                </td>
+                                                <td key={`bk-f-${i}`} className="p-0.5 border-r"><input type="number" className="w-7 text-center rounded border border-yellow-200 font-bold text-yellow-600 bg-white" value={bk || ''} onChange={(e) => updateField('sand', i, e.target.value)} /></td>
                                             ))}
                                             <td className="border-r bg-emerald-50/50 font-bold text-yellow-600">{editableData.sand.slice(0, 9).reduce((a,b)=>a+(Number(b)||0),0) || ''}</td>
                                             {editableData.sand.slice(9, 18).map((bk, i) => (
-                                                <td key={`bk-b-${i}`} className="p-0.5 border-r">
-                                                    <input type="number" className="w-7 text-center rounded border border-yellow-200 font-bold text-yellow-600 bg-white" value={bk || ''} onChange={(e) => updateField('sand', i + 9, e.target.value)} />
-                                                </td>
+                                                <td key={`bk-b-${i}`} className="p-0.5 border-r"><input type="number" className="w-7 text-center rounded border border-yellow-200 font-bold text-yellow-600 bg-white" value={bk || ''} onChange={(e) => updateField('sand', i + 9, e.target.value)} /></td>
                                             ))}
                                             <td className="border-r bg-blue-50/50 font-bold text-yellow-600">{editableData.sand.slice(9, 18).reduce((a,b)=>a+(Number(b)||0),0) || ''}</td>
                                             <td className="bg-indigo-50/50 font-black text-yellow-600">{editableData.sand.reduce((a,b)=>a+(Number(b)||0),0) || ''}</td>
@@ -549,25 +501,16 @@
                                         {editableData.partners.map((partner, pIdx) => (
                                             <tr key={`partner-${pIdx}`} className="hover:bg-gray-50/50 border-t border-gray-200">
                                                 <td className="p-1 border-r text-left pl-2 bg-gray-50">
-                                                    <input 
-                                                        type="text" 
-                                                        className="w-20 px-1 py-0.5 text-xs font-bold text-gray-700 rounded border border-gray-200 bg-white" 
-                                                        value={partner.name} 
-                                                        onChange={(e) => updateField('partnerName', pIdx, e.target.value)} 
-                                                    />
+                                                    <input type="text" className="w-20 px-1 py-0.5 text-xs font-bold text-gray-700 rounded border border-gray-200 bg-white" value={partner.name} onChange={(e) => updateField('partnerName', pIdx, e.target.value)} />
                                                 </td>
                                                 {partner.score.slice(0, 9).map((sc, i) => (
-                                                    <td key={`ptn-${pIdx}-f-${i}`} className="p-0.5 border-r">
-                                                        <input type="number" className="w-7 text-center rounded border border-gray-200 font-bold text-gray-700 bg-white" value={sc} onChange={(e) => updateField('partnerScore', i, e.target.value, pIdx)} />
-                                                    </td>
+                                                    <td key={`ptn-${pIdx}-f-${i}`} className="p-0.5 border-r"><input type="number" className="w-7 text-center rounded border border-gray-200 font-bold text-gray-700 bg-white" value={sc} onChange={(e) => updateField('partnerScore', i, e.target.value, pIdx)} /></td>
                                                 ))}
                                                 <td className="border-r bg-emerald-50/50 font-bold text-gray-700">
                                                     {editableData.par.slice(0, 9).reduce((acc, p, idx) => acc + p + (Number(partner.score[idx]) || 0), 0)}
                                                 </td>
                                                 {partner.score.slice(9, 18).map((sc, i) => (
-                                                    <td key={`ptn-${pIdx}-b-${i}`} className="p-0.5 border-r">
-                                                        <input type="number" className="w-7 text-center rounded border border-gray-200 font-bold text-gray-700 bg-white" value={sc} onChange={(e) => updateField('partnerScore', i + 9, e.target.value, pIdx)} />
-                                                    </td>
+                                                    <td key={`ptn-${pIdx}-b-${i}`} className="p-0.5 border-r"><input type="number" className="w-7 text-center rounded border border-gray-200 font-bold text-gray-700 bg-white" value={sc} onChange={(e) => updateField('partnerScore', i + 9, e.target.value, pIdx)} /></td>
                                                 ))}
                                                 <td className="border-r bg-blue-50/50 font-bold text-gray-700">
                                                     {editableData.par.slice(9, 18).reduce((acc, p, idx) => acc + p + (Number(partner.score[idx + 9]) || 0), 0)}
@@ -609,8 +552,8 @@
 
         const App = () => {
             const [data, setData] = useState([]);
-            // AI 업로드 탭이 먼저 보이도록 초기 상태 설정 (시트 로딩과 무관하게 열림)
-            const [activeTab, setActiveTab] = useState('ai-upload');
+            // 첫 화면이 대시보드가 되도록 설정
+            const [activeTab, setActiveTab] = useState('dashboard');
             const [isMobile, setIsMobile] = useState(window.innerWidth < 768);
             const [isSidebarOpen, setIsSidebarOpen] = useState(window.innerWidth >= 768);
             const [debugInfo, setDebugInfo] = useState(null);
@@ -636,41 +579,37 @@
             const fetchGoogleSheetData = async () => {
                 try {
                     setIsLoading(true);
-                    // 고객님의 구글 시트 ID
                     const sheetId = '1fH5iCTpsHwJbHG7Qh7Rot5zNfqB05DYfKbu2gStFD7g';
                     const ts = new Date().getTime();
                     
-                    // 기존 /export URL 대신 CORS 보안 차단이 없는 구글 공식 gviz API 엔드포인트 사용
-                    const fetchUrl = `https://docs.google.com/spreadsheets/d/${sheetId}/gviz/tq?tqx=out:csv&nocache=${ts}`;
-            
+                    // 'Raw' 탭에서 데이터를 정확히 가져오도록 지정 (CORS 우회 gviz 활용)
+                    const fetchUrl = `[https://docs.google.com/spreadsheets/d/$](https://docs.google.com/spreadsheets/d/$){sheetId}/gviz/tq?tqx=out:csv&sheet=Raw&nocache=${ts}`;
+
                     const response = await fetch(fetchUrl);
                     if (!response.ok) throw new Error(`HTTP Error ${response.status}`);
                     
-                    // 한글 깨짐 방지를 위해 arrayBuffer로 데이터 수신
                     const arrayBuffer = await response.arrayBuffer();
                     
-                    // 시트가 '비공개' 상태일 경우 구글 로그인 HTML 페이지가 반환되므로 이를 감지하여 차단
                     const textCheck = new TextDecoder().decode(arrayBuffer.slice(0, 100));
                     if (textCheck.includes('<!DOCTYPE html>')) {
                         throw new Error("구글 시트가 비공개 상태입니다. '링크가 있는 모든 사용자 보기' 권한으로 변경해주세요.");
                     }
-            
-                    // 수신된 CSV 데이터를 기존 엑셀 파서로 동일하게 읽기
+
                     const wb = XLSX.read(arrayBuffer, { type: 'array' });
-                    const ws = wb.Sheets[wb.SheetNames[0]];
+                    const ws = wb.Sheets[wb.SheetNames[0]]; 
                     const rawArray = XLSX.utils.sheet_to_json(ws, { header: 1 });
                     
                     if (rawArray && rawArray.length > 0) {
                         processRawArray(rawArray);
                     } else {
-                        throw new Error("시트 내에 데이터가 비어있습니다.");
+                        throw new Error("데이터가 비어있습니다. 'Raw' 시트를 확인해주세요.");
                     }
-            
+
                 } catch (error) {
                     console.error("[Fetch Error]", error);
                     setDebugInfo({ 
                         headers: ["자동 데이터 불러오기 실패"], 
-                        firstRow: [error.message, "구글 시트 공유 상태를 확인하시거나 엑셀 파일을 수동으로 업로드해주세요."] 
+                        firstRow: [error.message, "엑셀 파일을 수동으로 업로드해주세요."] 
                     });
                     setIsLoading(false);
                 }
