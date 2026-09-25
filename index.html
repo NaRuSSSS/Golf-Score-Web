@@ -636,27 +636,41 @@
             const fetchGoogleSheetData = async () => {
                 try {
                     setIsLoading(true);
+                    // 고객님의 구글 시트 ID
                     const sheetId = '1fH5iCTpsHwJbHG7Qh7Rot5zNfqB05DYfKbu2gStFD7g';
                     const ts = new Date().getTime();
-                    const exportUrl = `[https://docs.google.com/spreadsheets/d/$](https://docs.google.com/spreadsheets/d/$){sheetId}/export?format=xlsx&nocache=${ts}`;
-
-                    const response = await fetch(exportUrl);
+                    
+                    // 기존 /export URL 대신 CORS 보안 차단이 없는 구글 공식 gviz API 엔드포인트 사용
+                    const fetchUrl = `https://docs.google.com/spreadsheets/d/${sheetId}/gviz/tq?tqx=out:csv&nocache=${ts}`;
+            
+                    const response = await fetch(fetchUrl);
                     if (!response.ok) throw new Error(`HTTP Error ${response.status}`);
                     
+                    // 한글 깨짐 방지를 위해 arrayBuffer로 데이터 수신
                     const arrayBuffer = await response.arrayBuffer();
-                    const wb = XLSX.read(arrayBuffer, {type: 'array', cellDates: true});
-                    const wsname = wb.SheetNames.includes('Raw') ? 'Raw' : wb.SheetNames[0];
-                    const ws = wb.Sheets[wsname];
+                    
+                    // 시트가 '비공개' 상태일 경우 구글 로그인 HTML 페이지가 반환되므로 이를 감지하여 차단
+                    const textCheck = new TextDecoder().decode(arrayBuffer.slice(0, 100));
+                    if (textCheck.includes('<!DOCTYPE html>')) {
+                        throw new Error("구글 시트가 비공개 상태입니다. '링크가 있는 모든 사용자 보기' 권한으로 변경해주세요.");
+                    }
+            
+                    // 수신된 CSV 데이터를 기존 엑셀 파서로 동일하게 읽기
+                    const wb = XLSX.read(arrayBuffer, { type: 'array' });
+                    const ws = wb.Sheets[wb.SheetNames[0]];
                     const rawArray = XLSX.utils.sheet_to_json(ws, { header: 1 });
                     
-                    if (rawArray && rawArray.length > 0) processRawArray(rawArray);
-                    else setIsLoading(false);
-
+                    if (rawArray && rawArray.length > 0) {
+                        processRawArray(rawArray);
+                    } else {
+                        throw new Error("시트 내에 데이터가 비어있습니다.");
+                    }
+            
                 } catch (error) {
                     console.error("[Fetch Error]", error);
                     setDebugInfo({ 
-                        headers: ["초기 버전 연결 실패"], 
-                        firstRow: [error.message, "수동 파일 업로드를 이용해주세요."] 
+                        headers: ["자동 데이터 불러오기 실패"], 
+                        firstRow: [error.message, "구글 시트 공유 상태를 확인하시거나 엑셀 파일을 수동으로 업로드해주세요."] 
                     });
                     setIsLoading(false);
                 }
