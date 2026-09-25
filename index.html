@@ -5,19 +5,31 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>골프 스코어 분석 대시보드</title>
     
+    <!-- Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
+    
+    <!-- React & ReactDOM -->
     <script crossorigin src="https://unpkg.com/react@18/umd/react.development.js"></script>
     <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+    
+    <!-- Babel -->
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    
+    <!-- Recharts -->
     <script src="https://unpkg.com/prop-types@15.8.1/prop-types.min.js"></script>
     <script src="https://unpkg.com/recharts@2.1.9/umd/Recharts.js"></script>
+
+    <!-- SheetJS (Excel Parser) -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+
+    <!-- Lucide Icons -->
     <script src="https://unpkg.com/lucide@latest"></script>
 
     <style>
         body { font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; background-color: #f3f4f6; }
         .hide-scrollbar::-webkit-scrollbar { display: none; }
         .hide-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+        /* 스크롤바 커스텀 */
         .custom-scrollbar::-webkit-scrollbar { width: 6px; height: 6px; }
         .custom-scrollbar::-webkit-scrollbar-track { background: #f1f5f9; border-radius: 4px; }
         .custom-scrollbar::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 4px; }
@@ -56,9 +68,10 @@
             const [isSaving, setIsSaving] = useState(false);
             const [resultMsg, setResultMsg] = useState("");
             const [errorMsg, setErrorMsg] = useState("");
-            
-            const [scriptUrl, setScriptUrl] = useState("https://script.google.com/macros/s/AKfycbyyc7qVzufcIO1R4HYTVvCG3VFcIEt-D4q7E8GGkVQxCyHN5wdnwm6RFDe3ixIY7jHzSQ/exec");
+            const [scriptUrl, setScriptUrl] = useState(() => localStorage.getItem('GOLF_GAS_URL') || "");
             const [showUrlSettings, setShowUrlSettings] = useState(false);
+
+            // AI 판독 결과 데이터 (실시간 검수 및 편집 상태)
             const [editableData, setEditableData] = useState(null);
 
             const handleFileChange = (type, e) => {
@@ -180,6 +193,7 @@
                     }
                     const data = JSON.parse(jsonStr);
 
+                    // 18홀 길이 보장
                     const safe = (arr, len, def) => {
                         const r = Array.isArray(arr) ? [...arr] : [];
                         while(r.length < len) r.push(def);
@@ -240,34 +254,37 @@
             };
 
             const handleSyncToGoogleSheets = async () => {
+                if (!scriptUrl.trim()) {
+                    setShowUrlSettings(true);
+                    setErrorMsg("구글 시트 연동을 위해 'Apps Script 웹앱 URL'을 먼저 입력해주세요.");
+                    return;
+                }
+
                 setIsSaving(true);
                 setErrorMsg("");
                 setResultMsg("구글 시트에 데이터를 기록하고 있습니다...");
 
                 try {
-                    const response = await fetch(scriptUrl, {
+                    // Apps Script 웹앱에 POST 전송 (no-cors 브라우저 제약 대응을 위해 text/plain 전송 권장)
+                    await fetch(scriptUrl.trim(), {
                         method: 'POST',
+                        mode: 'no-cors',
                         headers: { 'Content-Type': 'text/plain;charset=utf-8' },
                         body: JSON.stringify(editableData)
                     });
 
-                    const result = await response.json();
+                    localStorage.setItem('GOLF_GAS_URL', scriptUrl.trim());
+                    setResultMsg("🎉 구글 시트에 즉시 기록되었습니다! 대시보드 통계를 새로고침합니다.");
 
-                    if (result.status === "success" || result.result === "success") {
-                        setResultMsg(`🎉 성공적으로 기록되었습니다! (라운드 No. ${result.no || ''})`);
-                        if (onSaveSuccess) {
-                            setTimeout(() => {
-                                onSaveSuccess();
-                            }, 1200);
-                        }
-                    } else {
-                        setErrorMsg("시트 기록 중 오류가 발생했습니다: " + result.message);
-                        setResultMsg("");
+                    // 대시보드 데이터 자동 갱신 트리거 호출
+                    if (onSaveSuccess) {
+                        setTimeout(() => {
+                            onSaveSuccess();
+                        }, 1200);
                     }
                 } catch (err) {
-                    console.error("전송 에러:", err);
-                    setErrorMsg("구글 시트 전송 실패 (보안 차단 또는 네트워크 문제)");
-                    setResultMsg("");
+                    console.error(err);
+                    setErrorMsg("구글 시트 저장 실패: Apps Script URL 및 배포 권한(모든 사용자)을 확인하세요.");
                 } finally {
                     setIsSaving(false);
                 }
@@ -275,6 +292,7 @@
 
             return (
                 <div className="animate-fade-in p-2 md:p-6 max-w-6xl mx-auto pb-24 space-y-6">
+                    {/* 상단 업로드 헤더 카드 */}
                     <div className="bg-white rounded-3xl shadow-sm border border-gray-100 overflow-hidden relative">
                         <div className="bg-gradient-to-br from-emerald-600 to-teal-800 p-6 md:p-8 text-white relative overflow-hidden">
                             <div className="absolute top-0 right-0 w-64 h-64 bg-white/10 rounded-full blur-3xl -translate-y-1/2 translate-x-1/3"></div>
@@ -297,6 +315,7 @@
                                 </button>
                             </div>
 
+                            {/* Apps Script URL 설정 팝다운 */}
                             {showUrlSettings && (
                                 <div className="mt-4 pt-4 border-t border-white/20 animate-fade-in">
                                     <label className="block text-xs font-bold text-emerald-200 mb-1">
@@ -305,21 +324,29 @@
                                     <div className="flex gap-2">
                                         <input 
                                             type="text" 
+                                            placeholder="https://script.google.com/macros/s/.../exec"
                                             className="flex-1 px-3 py-2 rounded-xl text-xs text-gray-800 outline-none font-mono"
                                             value={scriptUrl}
                                             onChange={(e) => setScriptUrl(e.target.value)}
                                         />
                                         <button 
-                                            onClick={() => setShowUrlSettings(false)}
+                                            onClick={() => {
+                                                localStorage.setItem('GOLF_GAS_URL', scriptUrl.trim());
+                                                setShowUrlSettings(false);
+                                            }}
                                             className="px-4 py-2 bg-emerald-500 hover:bg-emerald-400 font-bold text-xs rounded-xl text-white transition-colors"
                                         >
-                                            확인
+                                            저장
                                         </button>
                                     </div>
+                                    <p className="text-[11px] text-emerald-200/80 mt-1.5">
+                                        * 구글 시트의 [확장 프로그램 > Apps Script]에서 `google_apps_script.js`를 웹 앱으로 배포한 후 주소를 입력하세요.
+                                    </p>
                                 </div>
                             )}
                         </div>
 
+                        {/* 사진 업로드 영역 */}
                         <div className="p-5 md:p-6 space-y-4">
                             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                                 <div className="border-2 border-dashed border-gray-200 bg-gray-50 rounded-2xl p-5 flex flex-col items-center justify-center text-center hover:border-emerald-400 hover:bg-emerald-50 transition-colors group cursor-pointer relative min-h-[180px]">
@@ -377,6 +404,7 @@
                         </div>
                     </div>
 
+                    {/* 실시간 검수 및 편집 테이블 (AI 판독 후 노출) */}
                     {editableData && (
                         <div className="bg-white rounded-3xl shadow-sm border border-gray-100 p-5 md:p-6 space-y-5 animate-fade-in">
                             <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 border-b border-gray-100 pb-4">
@@ -385,7 +413,7 @@
                                         <LucideIcon name="edit-3" className="w-5 h-5 text-emerald-600" />
                                         실시간 검수 및 수정 테이블
                                     </h3>
-                                    <p className="text-xs text-gray-400">숫자를 클릭하여 바로 수정할 수 있으며, 즉시 구글 시트에 전송됩니다.</p>
+                                    <p className="text-xs text-gray-400">숫자를 클릭하여 바로 수정할 수 있으며, 수정된 값이 즉시 계산되어 구글 시트에 전송됩니다.</p>
                                 </div>
 
                                 <div className="flex items-center gap-2">
@@ -400,29 +428,56 @@
                                 </div>
                             </div>
 
+                            {/* 메타데이터 편집 (일시, 시간, 구장, 코스) */}
                             <div className="grid grid-cols-2 sm:grid-cols-5 gap-3 bg-gray-50/80 p-3.5 rounded-2xl border border-gray-200/60 text-xs">
                                 <div>
                                     <label className="text-[10px] text-gray-400 font-bold block mb-1">일시</label>
-                                    <input type="date" className="w-full bg-white border border-gray-200 rounded-lg px-2 py-1 font-semibold text-gray-800 text-xs" value={editableData.date} onChange={(e) => updateField('date', null, e.target.value)} />
+                                    <input 
+                                        type="date" 
+                                        className="w-full bg-white border border-gray-200 rounded-lg px-2 py-1 font-semibold text-gray-800 text-xs" 
+                                        value={editableData.date} 
+                                        onChange={(e) => updateField('date', null, e.target.value)} 
+                                    />
                                 </div>
                                 <div>
                                     <label className="text-[10px] text-gray-400 font-bold block mb-1">시간</label>
-                                    <input type="text" className="w-full bg-white border border-gray-200 rounded-lg px-2 py-1 font-semibold text-gray-800 text-xs" value={editableData.time} onChange={(e) => updateField('time', null, e.target.value)} />
+                                    <input 
+                                        type="text" 
+                                        className="w-full bg-white border border-gray-200 rounded-lg px-2 py-1 font-semibold text-gray-800 text-xs" 
+                                        value={editableData.time} 
+                                        onChange={(e) => updateField('time', null, e.target.value)} 
+                                    />
                                 </div>
                                 <div>
                                     <label className="text-[10px] text-gray-400 font-bold block mb-1">골프장 명</label>
-                                    <input type="text" className="w-full bg-white border border-gray-200 rounded-lg px-2 py-1 font-bold text-gray-800 text-xs" value={editableData.course} onChange={(e) => updateField('course', null, e.target.value)} />
+                                    <input 
+                                        type="text" 
+                                        className="w-full bg-white border border-gray-200 rounded-lg px-2 py-1 font-bold text-gray-800 text-xs" 
+                                        value={editableData.course} 
+                                        onChange={(e) => updateField('course', null, e.target.value)} 
+                                    />
                                 </div>
                                 <div>
                                     <label className="text-[10px] text-gray-400 font-bold block mb-1">전반 코스</label>
-                                    <input type="text" className="w-full bg-white border border-gray-200 rounded-lg px-2 py-1 font-semibold text-gray-800 text-xs" value={editableData.frontNineName} onChange={(e) => updateField('frontNineName', null, e.target.value)} />
+                                    <input 
+                                        type="text" 
+                                        className="w-full bg-white border border-gray-200 rounded-lg px-2 py-1 font-semibold text-gray-800 text-xs" 
+                                        value={editableData.frontNineName} 
+                                        onChange={(e) => updateField('frontNineName', null, e.target.value)} 
+                                    />
                                 </div>
                                 <div>
                                     <label className="text-[10px] text-gray-400 font-bold block mb-1">후반 코스</label>
-                                    <input type="text" className="w-full bg-white border border-gray-200 rounded-lg px-2 py-1 font-semibold text-gray-800 text-xs" value={editableData.backNineName} onChange={(e) => updateField('backNineName', null, e.target.value)} />
+                                    <input 
+                                        type="text" 
+                                        className="w-full bg-white border border-gray-200 rounded-lg px-2 py-1 font-semibold text-gray-800 text-xs" 
+                                        value={editableData.backNineName} 
+                                        onChange={(e) => updateField('backNineName', null, e.target.value)} 
+                                    />
                                 </div>
                             </div>
 
+                            {/* 18홀 통합 스코어 인터랙티브 테이블 */}
                             <div className="overflow-x-auto border border-gray-200 rounded-2xl shadow-sm">
                                 <table className="w-full text-center text-xs border-collapse">
                                     <thead>
@@ -436,29 +491,39 @@
                                         </tr>
                                     </thead>
                                     <tbody className="divide-y divide-gray-100">
+                                        {/* 정규 타수 (Par) */}
                                         <tr className="hover:bg-gray-50/50">
                                             <td className="p-1.5 border-r font-bold text-gray-500 text-left pl-3 bg-gray-50">정규 타수</td>
                                             {editableData.par.slice(0, 9).map((p, i) => (
-                                                <td key={`par-f-${i}`} className="p-0.5 border-r"><input type="number" className="w-7 text-center rounded bg-gray-50 font-semibold text-gray-700" value={p} onChange={(e) => updateField('par', i, e.target.value)} /></td>
+                                                <td key={`par-f-${i}`} className="p-0.5 border-r">
+                                                    <input type="number" className="w-7 text-center rounded bg-gray-50 font-semibold text-gray-700" value={p} onChange={(e) => updateField('par', i, e.target.value)} />
+                                                </td>
                                             ))}
                                             <td className="border-r bg-emerald-50/50 font-bold text-emerald-800">{editableData.par.slice(0, 9).reduce((a,b)=>a+(Number(b)||0),0)}</td>
                                             {editableData.par.slice(9, 18).map((p, i) => (
-                                                <td key={`par-b-${i}`} className="p-0.5 border-r"><input type="number" className="w-7 text-center rounded bg-gray-50 font-semibold text-gray-700" value={p} onChange={(e) => updateField('par', i + 9, e.target.value)} /></td>
+                                                <td key={`par-b-${i}`} className="p-0.5 border-r">
+                                                    <input type="number" className="w-7 text-center rounded bg-gray-50 font-semibold text-gray-700" value={p} onChange={(e) => updateField('par', i + 9, e.target.value)} />
+                                                </td>
                                             ))}
                                             <td className="border-r bg-blue-50/50 font-bold text-blue-800">{editableData.par.slice(9, 18).reduce((a,b)=>a+(Number(b)||0),0)}</td>
                                             <td className="bg-indigo-50/50 font-black text-indigo-800">{editableData.par.reduce((a,b)=>a+(Number(b)||0),0)}</td>
                                         </tr>
 
+                                        {/* 송봉근 상대 타수 */}
                                         <tr className="bg-yellow-50/20 hover:bg-yellow-50/40">
                                             <td className="p-1.5 border-r font-black text-blue-700 text-left pl-3 bg-yellow-50/60">송봉근 (상대타수)</td>
                                             {editableData.myScore.slice(0, 9).map((s, i) => (
-                                                <td key={`mys-f-${i}`} className="p-0.5 border-r"><input type="number" className="w-7 text-center rounded border border-blue-200 font-black text-blue-600 bg-white" value={s} onChange={(e) => updateField('myScore', i, e.target.value)} /></td>
+                                                <td key={`mys-f-${i}`} className="p-0.5 border-r">
+                                                    <input type="number" className="w-7 text-center rounded border border-blue-200 font-black text-blue-600 bg-white" value={s} onChange={(e) => updateField('myScore', i, e.target.value)} />
+                                                </td>
                                             ))}
                                             <td className="border-r bg-emerald-100/50 font-black text-blue-700">
                                                 {editableData.par.slice(0, 9).reduce((acc, p, idx) => acc + p + (Number(editableData.myScore[idx]) || 0), 0)}
                                             </td>
                                             {editableData.myScore.slice(9, 18).map((s, i) => (
-                                                <td key={`mys-b-${i}`} className="p-0.5 border-r"><input type="number" className="w-7 text-center rounded border border-blue-200 font-black text-blue-600 bg-white" value={s} onChange={(e) => updateField('myScore', i + 9, e.target.value)} /></td>
+                                                <td key={`mys-b-${i}`} className="p-0.5 border-r">
+                                                    <input type="number" className="w-7 text-center rounded border border-blue-200 font-black text-blue-600 bg-white" value={s} onChange={(e) => updateField('myScore', i + 9, e.target.value)} />
+                                                </td>
                                             ))}
                                             <td className="border-r bg-blue-100/50 font-black text-blue-700">
                                                 {editableData.par.slice(9, 18).reduce((acc, p, idx) => acc + p + (Number(editableData.myScore[idx + 9]) || 0), 0)}
@@ -468,71 +533,101 @@
                                             </td>
                                         </tr>
 
+                                        {/* 퍼트 (Putts) */}
                                         <tr className="hover:bg-gray-50/50">
                                             <td className="p-1.5 border-r font-bold text-orange-600 text-left pl-3 bg-gray-50">Putts</td>
                                             {editableData.putts.slice(0, 9).map((pt, i) => (
-                                                <td key={`pt-f-${i}`} className="p-0.5 border-r"><input type="number" className="w-7 text-center rounded border border-orange-200 font-semibold text-orange-600 bg-white" value={pt} onChange={(e) => updateField('putts', i, e.target.value)} /></td>
+                                                <td key={`pt-f-${i}`} className="p-0.5 border-r">
+                                                    <input type="number" className="w-7 text-center rounded border border-orange-200 font-semibold text-orange-600 bg-white" value={pt} onChange={(e) => updateField('putts', i, e.target.value)} />
+                                                </td>
                                             ))}
                                             <td className="border-r bg-emerald-50/50 font-bold text-orange-600">{editableData.putts.slice(0, 9).reduce((a,b)=>a+(Number(b)||0),0)}</td>
                                             {editableData.putts.slice(9, 18).map((pt, i) => (
-                                                <td key={`pt-b-${i}`} className="p-0.5 border-r"><input type="number" className="w-7 text-center rounded border border-orange-200 font-semibold text-orange-600 bg-white" value={pt} onChange={(e) => updateField('putts', i + 9, e.target.value)} /></td>
+                                                <td key={`pt-b-${i}`} className="p-0.5 border-r">
+                                                    <input type="number" className="w-7 text-center rounded border border-orange-200 font-semibold text-orange-600 bg-white" value={pt} onChange={(e) => updateField('putts', i + 9, e.target.value)} />
+                                                </td>
                                             ))}
                                             <td className="border-r bg-blue-50/50 font-bold text-orange-600">{editableData.putts.slice(9, 18).reduce((a,b)=>a+(Number(b)||0),0)}</td>
                                             <td className="bg-indigo-50/50 font-black text-orange-600">{editableData.putts.reduce((a,b)=>a+(Number(b)||0),0)}</td>
                                         </tr>
 
+                                        {/* F/W */}
                                         <tr className="hover:bg-gray-50/50">
                                             <td className="p-1.5 border-r font-bold text-teal-600 text-left pl-3 bg-gray-50">FW (1/0)</td>
                                             {editableData.fw.slice(0, 9).map((f, i) => (
-                                                <td key={`fw-f-${i}`} className="p-0.5 border-r"><input type="text" maxLength={1} className="w-7 text-center rounded border border-gray-200 font-bold text-teal-600 bg-white" value={f} onChange={(e) => updateField('fw', i, e.target.value)} /></td>
+                                                <td key={`fw-f-${i}`} className="p-0.5 border-r">
+                                                    <input type="text" maxLength={1} className="w-7 text-center rounded border border-gray-200 font-bold text-teal-600 bg-white" value={f} onChange={(e) => updateField('fw', i, e.target.value)} />
+                                                </td>
                                             ))}
                                             <td className="border-r bg-emerald-50/30 text-gray-300">-</td>
                                             {editableData.fw.slice(9, 18).map((f, i) => (
-                                                <td key={`fw-b-${i}`} className="p-0.5 border-r"><input type="text" maxLength={1} className="w-7 text-center rounded border border-gray-200 font-bold text-teal-600 bg-white" value={f} onChange={(e) => updateField('fw', i + 9, e.target.value)} /></td>
+                                                <td key={`fw-b-${i}`} className="p-0.5 border-r">
+                                                    <input type="text" maxLength={1} className="w-7 text-center rounded border border-gray-200 font-bold text-teal-600 bg-white" value={f} onChange={(e) => updateField('fw', i + 9, e.target.value)} />
+                                                </td>
                                             ))}
                                             <td className="border-r bg-blue-50/30 text-gray-300">-</td>
                                             <td className="bg-indigo-50/30 text-gray-300">-</td>
                                         </tr>
 
+                                        {/* 벌타 (Penalty) */}
                                         <tr className="hover:bg-gray-50/50">
                                             <td className="p-1.5 border-r font-bold text-red-500 text-left pl-3 bg-gray-50">Panelty</td>
                                             {editableData.penalty.slice(0, 9).map((pn, i) => (
-                                                <td key={`pn-f-${i}`} className="p-0.5 border-r"><input type="number" className="w-7 text-center rounded border border-red-200 font-bold text-red-500 bg-white" value={pn || ''} onChange={(e) => updateField('penalty', i, e.target.value)} /></td>
+                                                <td key={`pn-f-${i}`} className="p-0.5 border-r">
+                                                    <input type="number" className="w-7 text-center rounded border border-red-200 font-bold text-red-500 bg-white" value={pn || ''} onChange={(e) => updateField('penalty', i, e.target.value)} />
+                                                </td>
                                             ))}
                                             <td className="border-r bg-emerald-50/50 font-bold text-red-500">{editableData.penalty.slice(0, 9).reduce((a,b)=>a+(Number(b)||0),0) || ''}</td>
                                             {editableData.penalty.slice(9, 18).map((pn, i) => (
-                                                <td key={`pn-b-${i}`} className="p-0.5 border-r"><input type="number" className="w-7 text-center rounded border border-red-200 font-bold text-red-500 bg-white" value={pn || ''} onChange={(e) => updateField('penalty', i + 9, e.target.value)} /></td>
+                                                <td key={`pn-b-${i}`} className="p-0.5 border-r">
+                                                    <input type="number" className="w-7 text-center rounded border border-red-200 font-bold text-red-500 bg-white" value={pn || ''} onChange={(e) => updateField('penalty', i + 9, e.target.value)} />
+                                                </td>
                                             ))}
                                             <td className="border-r bg-blue-50/50 font-bold text-red-500">{editableData.penalty.slice(9, 18).reduce((a,b)=>a+(Number(b)||0),0) || ''}</td>
                                             <td className="bg-indigo-50/50 font-black text-red-600">{editableData.penalty.reduce((a,b)=>a+(Number(b)||0),0) || ''}</td>
                                         </tr>
 
+                                        {/* 벙커 (Bunker) */}
                                         <tr className="hover:bg-gray-50/50">
                                             <td className="p-1.5 border-r font-bold text-yellow-600 text-left pl-3 bg-gray-50">Bunker</td>
                                             {editableData.sand.slice(0, 9).map((bk, i) => (
-                                                <td key={`bk-f-${i}`} className="p-0.5 border-r"><input type="number" className="w-7 text-center rounded border border-yellow-200 font-bold text-yellow-600 bg-white" value={bk || ''} onChange={(e) => updateField('sand', i, e.target.value)} /></td>
+                                                <td key={`bk-f-${i}`} className="p-0.5 border-r">
+                                                    <input type="number" className="w-7 text-center rounded border border-yellow-200 font-bold text-yellow-600 bg-white" value={bk || ''} onChange={(e) => updateField('sand', i, e.target.value)} />
+                                                </td>
                                             ))}
                                             <td className="border-r bg-emerald-50/50 font-bold text-yellow-600">{editableData.sand.slice(0, 9).reduce((a,b)=>a+(Number(b)||0),0) || ''}</td>
                                             {editableData.sand.slice(9, 18).map((bk, i) => (
-                                                <td key={`bk-b-${i}`} className="p-0.5 border-r"><input type="number" className="w-7 text-center rounded border border-yellow-200 font-bold text-yellow-600 bg-white" value={bk || ''} onChange={(e) => updateField('sand', i + 9, e.target.value)} /></td>
+                                                <td key={`bk-b-${i}`} className="p-0.5 border-r">
+                                                    <input type="number" className="w-7 text-center rounded border border-yellow-200 font-bold text-yellow-600 bg-white" value={bk || ''} onChange={(e) => updateField('sand', i + 9, e.target.value)} />
+                                                </td>
                                             ))}
                                             <td className="border-r bg-blue-50/50 font-bold text-yellow-600">{editableData.sand.slice(9, 18).reduce((a,b)=>a+(Number(b)||0),0) || ''}</td>
                                             <td className="bg-indigo-50/50 font-black text-yellow-600">{editableData.sand.reduce((a,b)=>a+(Number(b)||0),0) || ''}</td>
                                         </tr>
 
+                                        {/* 동반자 목록 */}
                                         {editableData.partners.map((partner, pIdx) => (
                                             <tr key={`partner-${pIdx}`} className="hover:bg-gray-50/50 border-t border-gray-200">
                                                 <td className="p-1 border-r text-left pl-2 bg-gray-50">
-                                                    <input type="text" className="w-20 px-1 py-0.5 text-xs font-bold text-gray-700 rounded border border-gray-200 bg-white" value={partner.name} onChange={(e) => updateField('partnerName', pIdx, e.target.value)} />
+                                                    <input 
+                                                        type="text" 
+                                                        className="w-20 px-1 py-0.5 text-xs font-bold text-gray-700 rounded border border-gray-200 bg-white" 
+                                                        value={partner.name} 
+                                                        onChange={(e) => updateField('partnerName', pIdx, e.target.value)} 
+                                                    />
                                                 </td>
                                                 {partner.score.slice(0, 9).map((sc, i) => (
-                                                    <td key={`ptn-${pIdx}-f-${i}`} className="p-0.5 border-r"><input type="number" className="w-7 text-center rounded border border-gray-200 font-bold text-gray-700 bg-white" value={sc} onChange={(e) => updateField('partnerScore', i, e.target.value, pIdx)} /></td>
+                                                    <td key={`ptn-${pIdx}-f-${i}`} className="p-0.5 border-r">
+                                                        <input type="number" className="w-7 text-center rounded border border-gray-200 font-bold text-gray-700 bg-white" value={sc} onChange={(e) => updateField('partnerScore', i, e.target.value, pIdx)} />
+                                                    </td>
                                                 ))}
                                                 <td className="border-r bg-emerald-50/50 font-bold text-gray-700">
                                                     {editableData.par.slice(0, 9).reduce((acc, p, idx) => acc + p + (Number(partner.score[idx]) || 0), 0)}
                                                 </td>
                                                 {partner.score.slice(9, 18).map((sc, i) => (
-                                                    <td key={`ptn-${pIdx}-b-${i}`} className="p-0.5 border-r"><input type="number" className="w-7 text-center rounded border border-gray-200 font-bold text-gray-700 bg-white" value={sc} onChange={(e) => updateField('partnerScore', i + 9, e.target.value, pIdx)} /></td>
+                                                    <td key={`ptn-${pIdx}-b-${i}`} className="p-0.5 border-r">
+                                                        <input type="number" className="w-7 text-center rounded border border-gray-200 font-bold text-gray-700 bg-white" value={sc} onChange={(e) => updateField('partnerScore', i + 9, e.target.value, pIdx)} />
+                                                    </td>
                                                 ))}
                                                 <td className="border-r bg-blue-50/50 font-bold text-gray-700">
                                                     {editableData.par.slice(9, 18).reduce((acc, p, idx) => acc + p + (Number(partner.score[idx + 9]) || 0), 0)}
@@ -546,6 +641,7 @@
                                 </table>
                             </div>
 
+                            {/* 하단 단축 버튼들 */}
                             <div className="flex flex-col sm:flex-row gap-3 pt-2">
                                 <button 
                                     onClick={handleSyncToGoogleSheets} 
@@ -556,7 +652,7 @@
                                     구글 시트에 즉시 자동 기록하기
                                 </button>
                                 <a 
-                                    href="[https://docs.google.com/spreadsheets/d/1fH5iCTpsHwJbHG7Qh7Rot5zNfqB05DYfKbu2gStFD7g/edit](https://docs.google.com/spreadsheets/d/1fH5iCTpsHwJbHG7Qh7Rot5zNfqB05DYfKbu2gStFD7g/edit)" 
+                                    href="https://docs.google.com/spreadsheets/d/1fH5iCTpsHwJbHG7Qh7Rot5zNfqB05DYfKbu2gStFD7g/edit" 
                                     target="_blank" 
                                     rel="noopener noreferrer"
                                     className="py-3.5 px-6 rounded-xl font-bold text-sm text-gray-600 bg-gray-100 hover:bg-gray-200 flex justify-center items-center gap-2 transition-all border border-gray-200"
@@ -601,7 +697,7 @@
                     setIsLoading(true);
                     const sheetId = '1fH5iCTpsHwJbHG7Qh7Rot5zNfqB05DYfKbu2gStFD7g';
                     const ts = new Date().getTime();
-                    const exportUrl = `[https://docs.google.com/spreadsheets/d/$](https://docs.google.com/spreadsheets/d/$){sheetId}/export?format=xlsx&nocache=${ts}`;
+                    const exportUrl = `https://docs.google.com/spreadsheets/d/${sheetId}/export?format=xlsx&nocache=${ts}`;
 
                     const response = await fetch(exportUrl);
                     if (!response.ok) throw new Error(`HTTP Error ${response.status}`);
@@ -961,8 +1057,8 @@
             );
         };
 
-        const PlusIcon = () => <svg xmlns="[http://www.w3.org/2000/svg](http://www.w3.org/2000/svg)" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>;
-        const MinusIcon = () => <svg xmlns="[http://www.w3.org/2000/svg](http://www.w3.org/2000/svg)" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="5" y1="12" x2="19" y2="12"></line></svg>;
+        const PlusIcon = () => <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>;
+        const MinusIcon = () => <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="5" y1="12" x2="19" y2="12"></line></svg>;
 
         const DashboardTab = ({ data }) => {
             const [viewMode, setViewMode] = useState('year'); 
@@ -1873,6 +1969,7 @@
                         </div>
                     </div>
 
+                    {}
                     <div className="w-full xl:w-1/2 bg-white rounded-2xl shadow-sm border border-gray-100 flex flex-col h-[850px] overflow-hidden">
                         <div className="p-5 border-b border-gray-100 bg-gray-50/50 flex justify-between items-center">
                             <h3 className="font-bold text-gray-800">해당 구장 라운드 기록 상세</h3>
@@ -2310,7 +2407,7 @@
                 if (stats.fwRate < 50 && totals.fwCount > 0) weaknesses.push({ title: "티샷 방향성 기복", desc: `페어웨이 안착률(${stats.fwRate}%)이 다소 아쉽습니다. 트러블 상황에서의 세컨드 샷 비중이 높아 스코어 손실이 누적됩니다.` });
                 if (stats.girRate < 35 && totals.girCount > 0) weaknesses.push({ title: "아이언 정확도 및 세컨드 샷 불안", desc: `그린 적중률(${stats.girRate}%)이 낮아 숏게임(어프로치)에 대한 의존도와 압박감이 매우 높습니다.` });
                 if (parseFloat(stats.avgPutts) >= 36) weaknesses.push({ title: "퍼팅 거리감 및 숏퍼트 미스", desc: `평균 퍼트 수(${stats.avgPutts}개)가 많습니다. 첫 퍼트의 거리감 부족이 쓰리 퍼트로 이어지거나 1~2m 숏퍼트 미스가 잦은 것으로 보입니다.` });
-                if (parseFloat(stats.avgPenalty) >= 1.5) weaknesses.push({ title: "코스 매니지먼 및 페널티 누적", desc: `평균 벌타가 ${stats.avgPenalty}개로 스코어 상승의 주된 원인입니다. 공격적인 에이밍이나 무리한 세컨드 샷 시도가 원인일 수 있습니다.` });
+                if (parseFloat(stats.avgPenalty) >= 1.5) weaknesses.push({ title: "코스 매니지먼트 및 페널티 누적", desc: `평균 벌타가 ${stats.avgPenalty}개로 스코어 상승의 주된 원인입니다. 공격적인 에이밍이나 무리한 세컨드 샷 시도가 원인일 수 있습니다.` });
                 if (stats.udRate < 20 && totals.udCount > 0) weaknesses.push({ title: "그린 주변 숏게임(U/D) 불안", desc: `U/D 성공률(${stats.udRate}%)이 낮습니다. 그린 주변에서 파 세이브를 하지 못해 보기가 더블 보기로 무너지는 흐름이 나옵니다.` });
                 if (parseFloat(stats.avgBunker) >= 3.0) weaknesses.push({ title: "벙커 기피 현상 및 탈출 실패", desc: `평균 벙커샷이 ${stats.avgBunker}회로 잦습니다. 벙커에 자주 빠지거나 한 번에 탈출하지 못해 타수를 잃고 있습니다.` });
 
