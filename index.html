@@ -1,0 +1,2529 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>골프 스코어 분석 대시보드</title>
+    
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script crossorigin src="https://unpkg.com/react@18/umd/react.development.js"></script>
+    <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <script src="https://unpkg.com/prop-types@15.8.1/prop-types.min.js"></script>
+    <script src="https://unpkg.com/recharts@2.1.9/umd/Recharts.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+    <script src="https://unpkg.com/lucide@latest"></script>
+
+    <style>
+        body { font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; background-color: #f3f4f6; }
+        .hide-scrollbar::-webkit-scrollbar { display: none; }
+        .hide-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+        .custom-scrollbar::-webkit-scrollbar { width: 6px; height: 6px; }
+        .custom-scrollbar::-webkit-scrollbar-track { background: #f1f5f9; border-radius: 4px; }
+        .custom-scrollbar::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 4px; }
+        .custom-scrollbar::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
+    </style>
+</head>
+<body>
+    <div id="root"></div>
+
+    <script type="text/babel">
+        const originalConsoleError = console.error;
+        console.error = (...args) => {
+            if (typeof args[0] === 'string' && args[0].includes('Support for defaultProps will be removed from function components')) {
+                return;
+            }
+            originalConsoleError(...args);
+        };
+
+        const { useState, useEffect, useMemo, useRef } = React;
+        const { ComposedChart, LineChart, Line, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, LabelList, RadarChart, PolarGrid, PolarAngleAxis, PolarRadiusAxis, Radar } = window.Recharts;
+
+        const LucideIcon = ({ name, className = "" }) => {
+            const ref = useRef(null);
+            useEffect(() => {
+                if (ref.current && window.lucide) {
+                    window.lucide.createIcons({ root: ref.current });
+                }
+            }, [name, className]);
+            return <span ref={ref} className="contents" dangerouslySetInnerHTML={{ __html: `<i data-lucide="${name}" class="${className}"></i>` }} />;
+        };
+
+        const AIVisionUploadTab = ({ onSaveSuccess }) => {
+            const [images, setImages] = useState({ summary: null, details: null });
+            const [previews, setPreviews] = useState({ summary: null, details: null });
+            const [isAnalyzing, setIsAnalyzing] = useState(false);
+            const [isSaving, setIsSaving] = useState(false);
+            const [resultMsg, setResultMsg] = useState("");
+            const [errorMsg, setErrorMsg] = useState("");
+            
+            const [scriptUrl, setScriptUrl] = useState("https://script.google.com/macros/s/AKfycbyyc7qVzufcIO1R4HYTVvCG3VFcIEt-D4q7E8GGkVQxCyHN5wdnwm6RFDe3ixIY7jHzSQ/exec");
+            const [showUrlSettings, setShowUrlSettings] = useState(false);
+            const [editableData, setEditableData] = useState(null);
+
+            const handleFileChange = (type, e) => {
+                const file = e.target.files[0];
+                if (file) {
+                    setImages(prev => ({ ...prev, [type]: file }));
+                    const reader = new FileReader();
+                    reader.onload = (evt) => setPreviews(prev => ({ ...prev, [type]: evt.target.result }));
+                    reader.readAsDataURL(file);
+                }
+            };
+
+            const fileToBase64 = (file) => new Promise((resolve, reject) => {
+                const reader = new FileReader();
+                reader.readAsDataURL(file);
+                reader.onload = () => resolve(reader.result.split(',')[1]);
+                reader.onerror = error => reject(error);
+            });
+
+            const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
+
+            const fetchWithRetry = async (url, options, maxRetries = 3) => {
+                let delay = 1000;
+                for (let i = 0; i < maxRetries; i++) {
+                    try {
+                        const response = await fetch(url, options);
+                        if (response.status === 429) {
+                            await sleep(delay);
+                            delay *= 2;
+                            continue;
+                        }
+                        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+                        return await response.json();
+                    } catch (err) {
+                        if (i === maxRetries - 1) throw err;
+                        await sleep(delay);
+                        delay *= 2;
+                    }
+                }
+            };
+
+            const handleAnalyze = async () => {
+                if (!images.summary) {
+                    setErrorMsg("최소한 스코어카드 사진(요약)은 업로드해주세요.");
+                    return;
+                }
+                setIsAnalyzing(true);
+                setResultMsg("AI가 이미지를 판독하고 있습니다... (약 10초 소요)");
+                setErrorMsg("");
+
+                try {
+                    const base64Summary = await fileToBase64(images.summary);
+                    let parts = [
+                        { text: `Analyze the provided golf scorecard images. Extract data into the requested JSON schema.
+                        - Convert all scores to relative to par (e.g., 0 for par, 1 for bogey, -1 for birdie, 2 for double bogey).
+                        - FW (Fairway Hit): 1 (Hit) or 0 (Miss). If Par 3, use empty string "".
+                        - GIR (Green In Regulation): 'Y' or 'N'.
+                        - Putts, Sand, Penalty: Extract exact numbers. If blank, use 0.
+                        - Course Names: Extract front and back nine names.
+                        - Ensure exactly 18 values in arrays.` },
+                        { inlineData: { mimeType: images.summary.type, data: base64Summary } }
+                    ];
+
+                    if (images.details) {
+                        const base64Details = await fileToBase64(images.details);
+                        parts.push({ inlineData: { mimeType: images.details.type, data: base64Details } });
+                    }
+
+                    const payload = {
+                        contents: [{ role: "user", parts: parts }],
+                        generationConfig: {
+                            responseMimeType: "application/json",
+                            responseSchema: {
+                                type: "OBJECT",
+                                properties: {
+                                    date: { type: "STRING", description: "YYYY-MM-DD" },
+                                    time: { type: "STRING", description: "HH:MM" },
+                                    course: { type: "STRING" },
+                                    frontNineName: { type: "STRING" },
+                                    backNineName: { type: "STRING" },
+                                    par: { type: "ARRAY", items: { type: "NUMBER" } },
+                                    myScore: { type: "ARRAY", items: { type: "NUMBER" } },
+                                    putts: { type: "ARRAY", items: { type: "NUMBER" } },
+                                    fw: { type: "ARRAY", items: { type: "STRING" } },
+                                    gir: { type: "ARRAY", items: { type: "STRING" } },
+                                    sand: { type: "ARRAY", items: { type: "NUMBER" } },
+                                    penalty: { type: "ARRAY", items: { type: "NUMBER" } },
+                                    partners: {
+                                        type: "ARRAY",
+                                        items: {
+                                            type: "OBJECT",
+                                            properties: {
+                                                name: { type: "STRING" },
+                                                score: { type: "ARRAY", items: { type: "NUMBER" } }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    };
+
+                    const apiKey = "";
+                    const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-3-flash-preview:generateContent?key=${apiKey}`;
+
+                    const result = await fetchWithRetry(apiUrl, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(payload)
+                    });
+
+                    if (!result.candidates || result.candidates.length === 0) {
+                        throw new Error("AI 응답을 받지 못했습니다.");
+                    }
+
+                    let jsonStr = result.candidates[0].content.parts[0].text;
+                    if (jsonStr.includes('```')) {
+                        jsonStr = jsonStr.replace(/```json/g, '').replace(/```/g, '').trim();
+                    }
+                    const data = JSON.parse(jsonStr);
+
+                    const safe = (arr, len, def) => {
+                        const r = Array.isArray(arr) ? [...arr] : [];
+                        while(r.length < len) r.push(def);
+                        return r.slice(0, len);
+                    };
+
+                    const normalizedData = {
+                        date: data.date || new Date().toISOString().substring(0, 10),
+                        time: data.time || "07:00",
+                        course: data.course || "골프장",
+                        frontNineName: data.frontNineName || "전반",
+                        backNineName: data.backNineName || "후반",
+                        par: safe(data.par, 18, 4),
+                        myScore: safe(data.myScore, 18, 0),
+                        putts: safe(data.putts, 18, 2),
+                        fw: safe(data.fw, 18, ""),
+                        gir: safe(data.gir, 18, ""),
+                        sand: safe(data.sand, 18, 0),
+                        penalty: safe(data.penalty, 18, 0),
+                        partners: Array.isArray(data.partners) ? data.partners.map(p => ({
+                            name: p.name || "",
+                            score: safe(p.score, 18, 0)
+                        })) : []
+                    };
+                    
+                    setEditableData(normalizedData);
+                    setResultMsg("✅ 분석 완료! 아래 검수 테이블에서 확인 후 구글 시트에 자동 기록하세요.");
+                } catch (err) {
+                    console.error(err);
+                    setErrorMsg("분석 중 오류가 발생했습니다: 사진 상태를 확인해 주세요.");
+                    setResultMsg("");
+                } finally {
+                    setIsAnalyzing(false);
+                }
+            };
+
+            const updateField = (category, index, value, partnerIdx = null) => {
+                if (!editableData) return;
+                setEditableData(prev => {
+                    const next = { ...prev };
+                    if (partnerIdx !== null) {
+                        const newPartners = [...next.partners];
+                        newPartners[partnerIdx].score[index] = Number(value) || 0;
+                        next.partners = newPartners;
+                    } else if (category === 'partnerName') {
+                        const newPartners = [...next.partners];
+                        newPartners[index].name = value;
+                        next.partners = newPartners;
+                    } else if (Array.isArray(next[category])) {
+                        const newArr = [...next[category]];
+                        newArr[index] = (category === 'fw' || category === 'gir') ? value : (value === '' ? '' : Number(value) || 0);
+                        next[category] = newArr;
+                    } else {
+                        next[category] = value;
+                    }
+                    return next;
+                });
+            };
+
+            const handleSyncToGoogleSheets = async () => {
+                setIsSaving(true);
+                setErrorMsg("");
+                setResultMsg("구글 시트에 데이터를 기록하고 있습니다...");
+
+                try {
+                    const response = await fetch(scriptUrl, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+                        body: JSON.stringify(editableData)
+                    });
+
+                    const result = await response.json();
+
+                    if (result.status === "success" || result.result === "success") {
+                        setResultMsg(`🎉 성공적으로 기록되었습니다! (라운드 No. ${result.no || ''})`);
+                        if (onSaveSuccess) {
+                            setTimeout(() => {
+                                onSaveSuccess();
+                            }, 1200);
+                        }
+                    } else {
+                        setErrorMsg("시트 기록 중 오류가 발생했습니다: " + result.message);
+                        setResultMsg("");
+                    }
+                } catch (err) {
+                    console.error("전송 에러:", err);
+                    setErrorMsg("구글 시트 전송 실패 (보안 차단 또는 네트워크 문제)");
+                    setResultMsg("");
+                } finally {
+                    setIsSaving(false);
+                }
+            };
+
+            return (
+                <div className="animate-fade-in p-2 md:p-6 max-w-6xl mx-auto pb-24 space-y-6">
+                    <div className="bg-white rounded-3xl shadow-sm border border-gray-100 overflow-hidden relative">
+                        <div className="bg-gradient-to-br from-emerald-600 to-teal-800 p-6 md:p-8 text-white relative overflow-hidden">
+                            <div className="absolute top-0 right-0 w-64 h-64 bg-white/10 rounded-full blur-3xl -translate-y-1/2 translate-x-1/3"></div>
+                            <div className="relative z-10 flex flex-col sm:flex-row justify-between sm:items-center gap-4">
+                                <div>
+                                    <h2 className="text-xl md:text-2xl font-black mb-1 flex items-center gap-2">
+                                        <LucideIcon name="sparkles" className="w-6 h-6 text-emerald-300" />
+                                        AI 스코어 변환 & 자동 기록
+                                    </h2>
+                                    <p className="text-emerald-100 text-xs md:text-sm opacity-90 max-w-lg">
+                                        스코어카드 사진을 올리면 AI가 즉시 판독하여 실시간 검수 테이블에 채워주고, 버튼 클릭 한 번으로 구글 시트에 자동 기록 및 대시보드가 새로고침됩니다.
+                                    </p>
+                                </div>
+                                <button 
+                                    onClick={() => setShowUrlSettings(!showUrlSettings)}
+                                    className="px-3 py-1.5 bg-white/15 hover:bg-white/25 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-colors self-start sm:self-auto border border-white/20"
+                                >
+                                    <LucideIcon name="settings" className="w-3.5 h-3.5" />
+                                    Apps Script 연동 설정
+                                </button>
+                            </div>
+
+                            {showUrlSettings && (
+                                <div className="mt-4 pt-4 border-t border-white/20 animate-fade-in">
+                                    <label className="block text-xs font-bold text-emerald-200 mb-1">
+                                        Google Apps Script 웹 앱 URL (배포 URL)
+                                    </label>
+                                    <div className="flex gap-2">
+                                        <input 
+                                            type="text" 
+                                            className="flex-1 px-3 py-2 rounded-xl text-xs text-gray-800 outline-none font-mono"
+                                            value={scriptUrl}
+                                            onChange={(e) => setScriptUrl(e.target.value)}
+                                        />
+                                        <button 
+                                            onClick={() => setShowUrlSettings(false)}
+                                            className="px-4 py-2 bg-emerald-500 hover:bg-emerald-400 font-bold text-xs rounded-xl text-white transition-colors"
+                                        >
+                                            확인
+                                        </button>
+                                    </div>
+                                </div>
+                            )}
+                        </div>
+
+                        <div className="p-5 md:p-6 space-y-4">
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                <div className="border-2 border-dashed border-gray-200 bg-gray-50 rounded-2xl p-5 flex flex-col items-center justify-center text-center hover:border-emerald-400 hover:bg-emerald-50 transition-colors group cursor-pointer relative min-h-[180px]">
+                                    <input type="file" accept="image/*" className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10" onChange={(e) => handleFileChange('summary', e)} />
+                                    {previews.summary ? (
+                                        <img src={previews.summary} alt="Summary" className="w-full h-full object-contain max-h-40 rounded-lg" />
+                                    ) : (
+                                        <>
+                                            <div className="w-12 h-12 bg-white shadow-sm rounded-full flex items-center justify-center mb-2 group-hover:scale-110 transition-transform">
+                                                <LucideIcon name="image" className="w-5 h-5 text-gray-400 group-hover:text-emerald-500" />
+                                            </div>
+                                            <h4 className="font-bold text-gray-700 text-sm mb-0.5">1. 스코어 요약 사진 (필수)</h4>
+                                            <p className="text-xs text-gray-400">구장명, 날짜, 동반자 점수</p>
+                                        </>
+                                    )}
+                                </div>
+
+                                <div className="border-2 border-dashed border-gray-200 bg-gray-50 rounded-2xl p-5 flex flex-col items-center justify-center text-center hover:border-emerald-400 hover:bg-emerald-50 transition-colors group cursor-pointer relative min-h-[180px]">
+                                    <input type="file" accept="image/*" className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10" onChange={(e) => handleFileChange('details', e)} />
+                                    {previews.details ? (
+                                        <img src={previews.details} alt="Details" className="w-full h-full object-contain max-h-40 rounded-lg" />
+                                    ) : (
+                                        <>
+                                            <div className="w-12 h-12 bg-white shadow-sm rounded-full flex items-center justify-center mb-2 group-hover:scale-110 transition-transform">
+                                                <LucideIcon name="image-plus" className="w-5 h-5 text-gray-400 group-hover:text-emerald-500" />
+                                            </div>
+                                            <h4 className="font-bold text-gray-700 text-sm mb-0.5">2. 세부 기록 사진 (선택)</h4>
+                                            <p className="text-xs text-gray-400">퍼트, FW, 페널티, 벙커샷</p>
+                                        </>
+                                    )}
+                                </div>
+                            </div>
+
+                            {errorMsg && (
+                                <div className="p-3.5 bg-red-50 text-red-600 rounded-xl text-xs md:text-sm font-bold flex items-center gap-2 border border-red-100">
+                                    <LucideIcon name="alert-circle" className="w-4 h-4 shrink-0" />
+                                    {errorMsg}
+                                </div>
+                            )}
+
+                            {resultMsg && !errorMsg && (
+                                <div className={`p-3.5 rounded-xl text-xs md:text-sm font-bold flex items-center gap-2 border ${isAnalyzing || isSaving ? 'bg-blue-50 text-blue-600 border-blue-100' : 'bg-emerald-50 text-emerald-600 border-emerald-100'}`}>
+                                    {isAnalyzing || isSaving ? <LucideIcon name="loader-2" className="w-4 h-4 shrink-0 animate-spin" /> : <LucideIcon name="check-circle" className="w-4 h-4 shrink-0" />}
+                                    {resultMsg}
+                                </div>
+                            )}
+
+                            <button 
+                                onClick={handleAnalyze} 
+                                disabled={isAnalyzing}
+                                className={`w-full py-3.5 rounded-xl font-black text-base flex justify-center items-center gap-2 transition-all shadow-md ${isAnalyzing ? 'bg-gray-200 text-gray-400 cursor-not-allowed' : 'bg-slate-900 hover:bg-slate-800 text-white hover:shadow-lg'}`}
+                            >
+                                {isAnalyzing ? <>AI가 스코어를 분석하고 있습니다...</> : <><LucideIcon name="sparkles" className="w-5 h-5 text-emerald-400" /> 사진 판독 및 검수 테이블 생성</>}
+                            </button>
+                        </div>
+                    </div>
+
+                    {editableData && (
+                        <div className="bg-white rounded-3xl shadow-sm border border-gray-100 p-5 md:p-6 space-y-5 animate-fade-in">
+                            <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 border-b border-gray-100 pb-4">
+                                <div>
+                                    <h3 className="text-lg font-black text-gray-800 flex items-center gap-2">
+                                        <LucideIcon name="edit-3" className="w-5 h-5 text-emerald-600" />
+                                        실시간 검수 및 수정 테이블
+                                    </h3>
+                                    <p className="text-xs text-gray-400">숫자를 클릭하여 바로 수정할 수 있으며, 즉시 구글 시트에 전송됩니다.</p>
+                                </div>
+
+                                <div className="flex items-center gap-2">
+                                    <button
+                                        onClick={handleSyncToGoogleSheets}
+                                        disabled={isSaving}
+                                        className={`px-5 py-2.5 rounded-xl font-black text-sm flex items-center gap-2 text-white shadow-md transition-all ${isSaving ? 'bg-emerald-300 cursor-wait' : 'bg-emerald-600 hover:bg-emerald-700 hover:shadow-lg'}`}
+                                    >
+                                        {isSaving ? <LucideIcon name="loader-2" className="w-4 h-4 animate-spin" /> : <LucideIcon name="send" className="w-4 h-4" />}
+                                        구글 시트에 즉시 자동 기록하기
+                                    </button>
+                                </div>
+                            </div>
+
+                            <div className="grid grid-cols-2 sm:grid-cols-5 gap-3 bg-gray-50/80 p-3.5 rounded-2xl border border-gray-200/60 text-xs">
+                                <div>
+                                    <label className="text-[10px] text-gray-400 font-bold block mb-1">일시</label>
+                                    <input type="date" className="w-full bg-white border border-gray-200 rounded-lg px-2 py-1 font-semibold text-gray-800 text-xs" value={editableData.date} onChange={(e) => updateField('date', null, e.target.value)} />
+                                </div>
+                                <div>
+                                    <label className="text-[10px] text-gray-400 font-bold block mb-1">시간</label>
+                                    <input type="text" className="w-full bg-white border border-gray-200 rounded-lg px-2 py-1 font-semibold text-gray-800 text-xs" value={editableData.time} onChange={(e) => updateField('time', null, e.target.value)} />
+                                </div>
+                                <div>
+                                    <label className="text-[10px] text-gray-400 font-bold block mb-1">골프장 명</label>
+                                    <input type="text" className="w-full bg-white border border-gray-200 rounded-lg px-2 py-1 font-bold text-gray-800 text-xs" value={editableData.course} onChange={(e) => updateField('course', null, e.target.value)} />
+                                </div>
+                                <div>
+                                    <label className="text-[10px] text-gray-400 font-bold block mb-1">전반 코스</label>
+                                    <input type="text" className="w-full bg-white border border-gray-200 rounded-lg px-2 py-1 font-semibold text-gray-800 text-xs" value={editableData.frontNineName} onChange={(e) => updateField('frontNineName', null, e.target.value)} />
+                                </div>
+                                <div>
+                                    <label className="text-[10px] text-gray-400 font-bold block mb-1">후반 코스</label>
+                                    <input type="text" className="w-full bg-white border border-gray-200 rounded-lg px-2 py-1 font-semibold text-gray-800 text-xs" value={editableData.backNineName} onChange={(e) => updateField('backNineName', null, e.target.value)} />
+                                </div>
+                            </div>
+
+                            <div className="overflow-x-auto border border-gray-200 rounded-2xl shadow-sm">
+                                <table className="w-full text-center text-xs border-collapse">
+                                    <thead>
+                                        <tr className="bg-slate-100 text-slate-700 font-bold text-[11px]">
+                                            <th className="p-2 border-r border-b text-left pl-3 w-24">구분</th>
+                                            {[1,2,3,4,5,6,7,8,9].map(n => <th key={n} className="p-1 border-r border-b w-8">{n}</th>)}
+                                            <th className="p-1 border-r border-b bg-emerald-50 text-emerald-700 font-black w-10">전반</th>
+                                            {[10,11,12,13,14,15,16,17,18].map(n => <th key={n} className="p-1 border-r border-b w-8">{n}</th>)}
+                                            <th className="p-1 border-r border-b bg-blue-50 text-blue-700 font-black w-10">후반</th>
+                                            <th className="p-1 border-b bg-indigo-50 text-indigo-700 font-black w-12">Total</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody className="divide-y divide-gray-100">
+                                        <tr className="hover:bg-gray-50/50">
+                                            <td className="p-1.5 border-r font-bold text-gray-500 text-left pl-3 bg-gray-50">정규 타수</td>
+                                            {editableData.par.slice(0, 9).map((p, i) => (
+                                                <td key={`par-f-${i}`} className="p-0.5 border-r"><input type="number" className="w-7 text-center rounded bg-gray-50 font-semibold text-gray-700" value={p} onChange={(e) => updateField('par', i, e.target.value)} /></td>
+                                            ))}
+                                            <td className="border-r bg-emerald-50/50 font-bold text-emerald-800">{editableData.par.slice(0, 9).reduce((a,b)=>a+(Number(b)||0),0)}</td>
+                                            {editableData.par.slice(9, 18).map((p, i) => (
+                                                <td key={`par-b-${i}`} className="p-0.5 border-r"><input type="number" className="w-7 text-center rounded bg-gray-50 font-semibold text-gray-700" value={p} onChange={(e) => updateField('par', i + 9, e.target.value)} /></td>
+                                            ))}
+                                            <td className="border-r bg-blue-50/50 font-bold text-blue-800">{editableData.par.slice(9, 18).reduce((a,b)=>a+(Number(b)||0),0)}</td>
+                                            <td className="bg-indigo-50/50 font-black text-indigo-800">{editableData.par.reduce((a,b)=>a+(Number(b)||0),0)}</td>
+                                        </tr>
+
+                                        <tr className="bg-yellow-50/20 hover:bg-yellow-50/40">
+                                            <td className="p-1.5 border-r font-black text-blue-700 text-left pl-3 bg-yellow-50/60">송봉근 (상대타수)</td>
+                                            {editableData.myScore.slice(0, 9).map((s, i) => (
+                                                <td key={`mys-f-${i}`} className="p-0.5 border-r"><input type="number" className="w-7 text-center rounded border border-blue-200 font-black text-blue-600 bg-white" value={s} onChange={(e) => updateField('myScore', i, e.target.value)} /></td>
+                                            ))}
+                                            <td className="border-r bg-emerald-100/50 font-black text-blue-700">
+                                                {editableData.par.slice(0, 9).reduce((acc, p, idx) => acc + p + (Number(editableData.myScore[idx]) || 0), 0)}
+                                            </td>
+                                            {editableData.myScore.slice(9, 18).map((s, i) => (
+                                                <td key={`mys-b-${i}`} className="p-0.5 border-r"><input type="number" className="w-7 text-center rounded border border-blue-200 font-black text-blue-600 bg-white" value={s} onChange={(e) => updateField('myScore', i + 9, e.target.value)} /></td>
+                                            ))}
+                                            <td className="border-r bg-blue-100/50 font-black text-blue-700">
+                                                {editableData.par.slice(9, 18).reduce((acc, p, idx) => acc + p + (Number(editableData.myScore[idx + 9]) || 0), 0)}
+                                            </td>
+                                            <td className="bg-indigo-100 font-black text-blue-800 text-sm">
+                                                {editableData.par.reduce((acc, p, idx) => acc + p + (Number(editableData.myScore[idx]) || 0), 0)}
+                                            </td>
+                                        </tr>
+
+                                        <tr className="hover:bg-gray-50/50">
+                                            <td className="p-1.5 border-r font-bold text-orange-600 text-left pl-3 bg-gray-50">Putts</td>
+                                            {editableData.putts.slice(0, 9).map((pt, i) => (
+                                                <td key={`pt-f-${i}`} className="p-0.5 border-r"><input type="number" className="w-7 text-center rounded border border-orange-200 font-semibold text-orange-600 bg-white" value={pt} onChange={(e) => updateField('putts', i, e.target.value)} /></td>
+                                            ))}
+                                            <td className="border-r bg-emerald-50/50 font-bold text-orange-600">{editableData.putts.slice(0, 9).reduce((a,b)=>a+(Number(b)||0),0)}</td>
+                                            {editableData.putts.slice(9, 18).map((pt, i) => (
+                                                <td key={`pt-b-${i}`} className="p-0.5 border-r"><input type="number" className="w-7 text-center rounded border border-orange-200 font-semibold text-orange-600 bg-white" value={pt} onChange={(e) => updateField('putts', i + 9, e.target.value)} /></td>
+                                            ))}
+                                            <td className="border-r bg-blue-50/50 font-bold text-orange-600">{editableData.putts.slice(9, 18).reduce((a,b)=>a+(Number(b)||0),0)}</td>
+                                            <td className="bg-indigo-50/50 font-black text-orange-600">{editableData.putts.reduce((a,b)=>a+(Number(b)||0),0)}</td>
+                                        </tr>
+
+                                        <tr className="hover:bg-gray-50/50">
+                                            <td className="p-1.5 border-r font-bold text-teal-600 text-left pl-3 bg-gray-50">FW (1/0)</td>
+                                            {editableData.fw.slice(0, 9).map((f, i) => (
+                                                <td key={`fw-f-${i}`} className="p-0.5 border-r"><input type="text" maxLength={1} className="w-7 text-center rounded border border-gray-200 font-bold text-teal-600 bg-white" value={f} onChange={(e) => updateField('fw', i, e.target.value)} /></td>
+                                            ))}
+                                            <td className="border-r bg-emerald-50/30 text-gray-300">-</td>
+                                            {editableData.fw.slice(9, 18).map((f, i) => (
+                                                <td key={`fw-b-${i}`} className="p-0.5 border-r"><input type="text" maxLength={1} className="w-7 text-center rounded border border-gray-200 font-bold text-teal-600 bg-white" value={f} onChange={(e) => updateField('fw', i + 9, e.target.value)} /></td>
+                                            ))}
+                                            <td className="border-r bg-blue-50/30 text-gray-300">-</td>
+                                            <td className="bg-indigo-50/30 text-gray-300">-</td>
+                                        </tr>
+
+                                        <tr className="hover:bg-gray-50/50">
+                                            <td className="p-1.5 border-r font-bold text-red-500 text-left pl-3 bg-gray-50">Panelty</td>
+                                            {editableData.penalty.slice(0, 9).map((pn, i) => (
+                                                <td key={`pn-f-${i}`} className="p-0.5 border-r"><input type="number" className="w-7 text-center rounded border border-red-200 font-bold text-red-500 bg-white" value={pn || ''} onChange={(e) => updateField('penalty', i, e.target.value)} /></td>
+                                            ))}
+                                            <td className="border-r bg-emerald-50/50 font-bold text-red-500">{editableData.penalty.slice(0, 9).reduce((a,b)=>a+(Number(b)||0),0) || ''}</td>
+                                            {editableData.penalty.slice(9, 18).map((pn, i) => (
+                                                <td key={`pn-b-${i}`} className="p-0.5 border-r"><input type="number" className="w-7 text-center rounded border border-red-200 font-bold text-red-500 bg-white" value={pn || ''} onChange={(e) => updateField('penalty', i + 9, e.target.value)} /></td>
+                                            ))}
+                                            <td className="border-r bg-blue-50/50 font-bold text-red-500">{editableData.penalty.slice(9, 18).reduce((a,b)=>a+(Number(b)||0),0) || ''}</td>
+                                            <td className="bg-indigo-50/50 font-black text-red-600">{editableData.penalty.reduce((a,b)=>a+(Number(b)||0),0) || ''}</td>
+                                        </tr>
+
+                                        <tr className="hover:bg-gray-50/50">
+                                            <td className="p-1.5 border-r font-bold text-yellow-600 text-left pl-3 bg-gray-50">Bunker</td>
+                                            {editableData.sand.slice(0, 9).map((bk, i) => (
+                                                <td key={`bk-f-${i}`} className="p-0.5 border-r"><input type="number" className="w-7 text-center rounded border border-yellow-200 font-bold text-yellow-600 bg-white" value={bk || ''} onChange={(e) => updateField('sand', i, e.target.value)} /></td>
+                                            ))}
+                                            <td className="border-r bg-emerald-50/50 font-bold text-yellow-600">{editableData.sand.slice(0, 9).reduce((a,b)=>a+(Number(b)||0),0) || ''}</td>
+                                            {editableData.sand.slice(9, 18).map((bk, i) => (
+                                                <td key={`bk-b-${i}`} className="p-0.5 border-r"><input type="number" className="w-7 text-center rounded border border-yellow-200 font-bold text-yellow-600 bg-white" value={bk || ''} onChange={(e) => updateField('sand', i + 9, e.target.value)} /></td>
+                                            ))}
+                                            <td className="border-r bg-blue-50/50 font-bold text-yellow-600">{editableData.sand.slice(9, 18).reduce((a,b)=>a+(Number(b)||0),0) || ''}</td>
+                                            <td className="bg-indigo-50/50 font-black text-yellow-600">{editableData.sand.reduce((a,b)=>a+(Number(b)||0),0) || ''}</td>
+                                        </tr>
+
+                                        {editableData.partners.map((partner, pIdx) => (
+                                            <tr key={`partner-${pIdx}`} className="hover:bg-gray-50/50 border-t border-gray-200">
+                                                <td className="p-1 border-r text-left pl-2 bg-gray-50">
+                                                    <input type="text" className="w-20 px-1 py-0.5 text-xs font-bold text-gray-700 rounded border border-gray-200 bg-white" value={partner.name} onChange={(e) => updateField('partnerName', pIdx, e.target.value)} />
+                                                </td>
+                                                {partner.score.slice(0, 9).map((sc, i) => (
+                                                    <td key={`ptn-${pIdx}-f-${i}`} className="p-0.5 border-r"><input type="number" className="w-7 text-center rounded border border-gray-200 font-bold text-gray-700 bg-white" value={sc} onChange={(e) => updateField('partnerScore', i, e.target.value, pIdx)} /></td>
+                                                ))}
+                                                <td className="border-r bg-emerald-50/50 font-bold text-gray-700">
+                                                    {editableData.par.slice(0, 9).reduce((acc, p, idx) => acc + p + (Number(partner.score[idx]) || 0), 0)}
+                                                </td>
+                                                {partner.score.slice(9, 18).map((sc, i) => (
+                                                    <td key={`ptn-${pIdx}-b-${i}`} className="p-0.5 border-r"><input type="number" className="w-7 text-center rounded border border-gray-200 font-bold text-gray-700 bg-white" value={sc} onChange={(e) => updateField('partnerScore', i + 9, e.target.value, pIdx)} /></td>
+                                                ))}
+                                                <td className="border-r bg-blue-50/50 font-bold text-gray-700">
+                                                    {editableData.par.slice(9, 18).reduce((acc, p, idx) => acc + p + (Number(partner.score[idx + 9]) || 0), 0)}
+                                                </td>
+                                                <td className="bg-indigo-50/50 font-black text-gray-800">
+                                                    {editableData.par.reduce((acc, p, idx) => acc + p + (Number(partner.score[idx]) || 0), 0)}
+                                                </td>
+                                            </tr>
+                                        ))}
+                                    </tbody>
+                                </table>
+                            </div>
+
+                            <div className="flex flex-col sm:flex-row gap-3 pt-2">
+                                <button 
+                                    onClick={handleSyncToGoogleSheets} 
+                                    disabled={isSaving}
+                                    className="flex-1 py-3.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl font-black text-sm flex items-center justify-center gap-2 shadow-md transition-all"
+                                >
+                                    {isSaving ? <LucideIcon name="loader-2" className="w-4 h-4 animate-spin" /> : <LucideIcon name="cloud-upload" className="w-4 h-4" />}
+                                    구글 시트에 즉시 자동 기록하기
+                                </button>
+                                <a 
+                                    href="[https://docs.google.com/spreadsheets/d/1fH5iCTpsHwJbHG7Qh7Rot5zNfqB05DYfKbu2gStFD7g/edit](https://docs.google.com/spreadsheets/d/1fH5iCTpsHwJbHG7Qh7Rot5zNfqB05DYfKbu2gStFD7g/edit)" 
+                                    target="_blank" 
+                                    rel="noopener noreferrer"
+                                    className="py-3.5 px-6 rounded-xl font-bold text-sm text-gray-600 bg-gray-100 hover:bg-gray-200 flex justify-center items-center gap-2 transition-all border border-gray-200"
+                                >
+                                    <LucideIcon name="external-link" className="w-4 h-4" />
+                                    내 구글 시트 확인
+                                </a>
+                            </div>
+                        </div>
+                    )}
+                </div>
+            );
+        };
+
+        const App = () => {
+            const [data, setData] = useState([]);
+            const [activeTab, setActiveTab] = useState('dashboard');
+            const [isMobile, setIsMobile] = useState(window.innerWidth < 768);
+            const [isSidebarOpen, setIsSidebarOpen] = useState(window.innerWidth >= 768);
+            const [debugInfo, setDebugInfo] = useState(null);
+            const [isLoading, setIsLoading] = useState(true);
+
+            useEffect(() => {
+                const handleResize = () => {
+                    const mobile = window.innerWidth < 768;
+                    setIsMobile(mobile);
+                    if (mobile) setIsSidebarOpen(false);
+                    else setIsSidebarOpen(true);
+                };
+                handleResize(); 
+                window.addEventListener('resize', handleResize);
+                return () => window.removeEventListener('resize', handleResize);
+            }, []);
+
+            const handleNavClick = (tab) => {
+                setActiveTab(tab);
+                if (window.innerWidth < 768) setIsSidebarOpen(false);
+            };
+
+            const fetchGoogleSheetData = async () => {
+                try {
+                    setIsLoading(true);
+                    const sheetId = '1fH5iCTpsHwJbHG7Qh7Rot5zNfqB05DYfKbu2gStFD7g';
+                    const ts = new Date().getTime();
+                    const exportUrl = `[https://docs.google.com/spreadsheets/d/$](https://docs.google.com/spreadsheets/d/$){sheetId}/export?format=xlsx&nocache=${ts}`;
+
+                    const response = await fetch(exportUrl);
+                    if (!response.ok) throw new Error(`HTTP Error ${response.status}`);
+                    
+                    const arrayBuffer = await response.arrayBuffer();
+                    const wb = XLSX.read(arrayBuffer, {type: 'array', cellDates: true});
+                    const wsname = wb.SheetNames.includes('Raw') ? 'Raw' : wb.SheetNames[0];
+                    const ws = wb.Sheets[wsname];
+                    const rawArray = XLSX.utils.sheet_to_json(ws, { header: 1 });
+                    
+                    if (rawArray && rawArray.length > 0) processRawArray(rawArray);
+                    else setIsLoading(false);
+
+                } catch (error) {
+                    console.error("[Fetch Error]", error);
+                    setDebugInfo({ 
+                        headers: ["초기 버전 연결 실패"], 
+                        firstRow: [error.message, "수동 파일 업로드를 이용해주세요."] 
+                    });
+                    setIsLoading(false);
+                }
+            };
+
+            useEffect(() => {
+                fetchGoogleSheetData();
+            }, []);
+            
+            const handleFileUpload = (e) => {
+                const file = e.target.files[0];
+                if (!file) return;
+                const reader = new FileReader();
+                reader.onload = (evt) => {
+                    try {
+                        const bstr = evt.target.result;
+                        const wb = XLSX.read(bstr, { type: 'binary', cellDates: true });
+                        const wsname = wb.SheetNames.includes('Raw') ? 'Raw' : wb.SheetNames[0];
+                        const ws = wb.Sheets[wsname];
+                        const rawArray = XLSX.utils.sheet_to_json(ws, { header: 1 });
+                        if (rawArray && rawArray.length > 0) processRawArray(rawArray);
+                    } catch (error) {
+                        alert('파일 읽기 오류: ' + error.message);
+                    }
+                };
+                reader.readAsBinaryString(file);
+            };
+
+            const processRawArray = (rawArray) => {
+                let headerRowIndex = -1;
+                let colNo = -1, colDate = -1, colCourse = -1, colName = -1, colDetail = -1, colTotal = -1;
+
+                for (let i = 0; i < Math.min(30, rawArray.length); i++) {
+                    const rowStr = (rawArray[i] || []).map(c => String(c || '').trim().toLowerCase());
+                    if (rowStr.includes('일시') && rowStr.includes('구장') && rowStr.includes('이름') && rowStr.includes('total')) {
+                        headerRowIndex = i;
+                        colNo = rowStr.indexOf('no.') !== -1 ? rowStr.indexOf('no.') : rowStr.indexOf('no');
+                        colDate = rowStr.indexOf('일시');
+                        colCourse = rowStr.indexOf('구장');
+                        colName = rowStr.indexOf('이름');
+                        colDetail = rowStr.indexOf('세부');
+                        colTotal = rowStr.indexOf('total');
+                        break;
+                    }
+                }
+
+                if (headerRowIndex === -1) {
+                    setDebugInfo({ headers: rawArray[0] || [], firstRow: rawArray[1] || [] });
+                    setIsLoading(false);
+                    return;
+                }
+
+                const parseDateStr = (val) => {
+                    if (!val) return null;
+                    if (val instanceof Date) {
+                        if (val.getFullYear() <= 1900) return null; 
+                        return `${val.getFullYear()}-${String(val.getMonth()+1).padStart(2,'0')}-${String(val.getDate()).padStart(2,'0')}`;
+                    }
+                    if (typeof val === 'string') {
+                        const m = val.match(/(\d{4})[-\./](\d{1,2})[-\./](\d{1,2})/);
+                        if (m) {
+                            if (parseInt(m[1]) <= 1900) return null;
+                            return `${m[1]}-${m[2].padStart(2,'0')}-${m[3].padStart(2,'0')}`;
+                        }
+                    }
+                    if (typeof val === 'number' && val > 40000) {
+                        let d = new Date(Math.round((val - 25569)*86400*1000));
+                        if (d.getFullYear() <= 1900) return null;
+                        return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+                    }
+                    return null;
+                };
+
+                let rounds = [];
+                let cur = null; 
+                let currentGroupKey = null;
+
+                for (let i = headerRowIndex + 1; i < rawArray.length; i++) {
+                    const row = rawArray[i];
+                    if (!row || row.length === 0) continue;
+
+                    let dStr = parseDateStr(row[colDate]);
+                    if (!dStr) continue;
+
+                    let groupKey = String(row[colNo] || '').trim() || dStr; 
+
+                    if (groupKey !== currentGroupKey) {
+                        if (cur && cur.score > 0) rounds.push(cur); 
+                        currentGroupKey = groupKey;
+                        cur = {
+                            id: groupKey,
+                            date: dStr,
+                            year: dStr.substring(0, 4),
+                            month: dStr.substring(0, 7),
+                            displayDate: dStr.substring(8, 10),
+                            fullDate: dStr,
+                            monthGroup: dStr.substring(0, 7),
+                            courseName: String(row[colCourse] || '알수없음').trim(),
+                            frontNine: String(row[colName] || '').trim(),
+                            backNine: String(row[colDetail] || '').trim(),
+                            score: 0, fwHit: 0, gir: 0, putts: 0, ud: 0, penalties: 0, bunkerShots: 0,
+                            partners: [],
+                            frontHalf: { course: String(row[colName] || '').trim(), score: 0, fwHit: 0, gir: 0, putts: 0, ud: 0, penalties: 0, bunkerShots: 0 },
+                            backHalf: { course: String(row[colDetail] || '').trim(), score: 0, fwHit: 0, gir: 0, putts: 0, ud: 0, penalties: 0, bunkerShots: 0 },
+                            holes: Array.from({length: 18}, (_, i) => ({ holeNo: i + 1, par: 0, score: 0, putts: 0, fw: '', gir: '', ud: '', penalty: 0, bunker: 0 }))
+                        };
+
+                        if (colDetail !== -1) {
+                            for(let k=0; k<9; k++) {
+                                cur.holes[k].par = parseFloat(row[colDetail + 1 + k]) || 0;
+                                cur.holes[k+9].par = parseFloat(row[colDetail + 11 + k]) || 0;
+                            }
+                        }
+                        continue;
+                    }
+
+                    if (!cur) continue;
+
+                    let fVal = String(row[colName] || '').trim();
+                    let gVal = String(row[colDetail] || '').trim();
+                    let totalNum = parseFloat(String(row[colTotal] || '').replace(/[^0-9.-]/g, ''));
+                    if (isNaN(totalNum)) continue;
+
+                    let frontTotal = 0, backTotal = 0;
+                    if (colDetail !== -1) {
+                        frontTotal = parseFloat(String(row[colDetail + 10] || '').replace(/[^0-9.-]/g, '')) || 0;
+                        backTotal = parseFloat(String(row[colDetail + 20] || '').replace(/[^0-9.-]/g, '')) || 0;
+                    }
+
+                    const processPerc = (val) => (val <= 1 && val > 0) ? Math.round(val * 100) : val;
+
+                    const processYN = (val) => {
+                        if (val === undefined || val === null || val === '') return '';
+                        const v = String(val).trim().toUpperCase();
+                        if (['1', '1.0', 'Y', 'O', 'TRUE'].includes(v)) return 'Y';
+                        if (['0', '0.0', 'N', 'X', 'FALSE'].includes(v)) return 'N';
+                        return '';
+                    };
+
+                    if (fVal === '송봉근') {
+                        cur.score = totalNum;
+                        cur.frontHalf.score = frontTotal;
+                        cur.backHalf.score = backTotal;
+                        for(let k=0; k<9; k++) {
+                            let ouF = row[colDetail + 1 + k];
+                            let ouB = row[colDetail + 11 + k];
+                            cur.holes[k].score = cur.holes[k].par + (ouF === 0 ? 0 : parseFloat(ouF) || 0);
+                            cur.holes[k+9].score = cur.holes[k+9].par + (ouB === 0 ? 0 : parseFloat(ouB) || 0);
+                        }
+                    } 
+                    else if (gVal === 'Putts') {
+                        cur.putts = totalNum;
+                        cur.frontHalf.putts = frontTotal;
+                        cur.backHalf.putts = backTotal;
+                        for(let k=0; k<9; k++) {
+                            cur.holes[k].putts = parseFloat(row[colDetail + 1 + k]) || 0;
+                            cur.holes[k+9].putts = parseFloat(row[colDetail + 11 + k]) || 0;
+                        }
+                    } 
+                    else if (gVal === 'FW') {
+                        cur.fwHit = processPerc(totalNum);
+                        cur.frontHalf.fwHit = processPerc(frontTotal);
+                        cur.backHalf.fwHit = processPerc(backTotal);
+                        for(let k=0; k<9; k++) {
+                            cur.holes[k].fw = processYN(row[colDetail + 1 + k]);
+                            cur.holes[k+9].fw = processYN(row[colDetail + 11 + k]);
+                        }
+                    } 
+                    else if (gVal === 'GIR') {
+                        cur.gir = processPerc(totalNum);
+                        cur.frontHalf.gir = processPerc(frontTotal);
+                        cur.backHalf.gir = processPerc(backTotal);
+                        for(let k=0; k<9; k++) {
+                            cur.holes[k].gir = processYN(row[colDetail + 1 + k]);
+                            cur.holes[k+9].gir = processYN(row[colDetail + 11 + k]);
+                        }
+                    } 
+                    else if (gVal === 'U&D') {
+                        cur.ud = processPerc(totalNum);
+                        cur.frontHalf.ud = processPerc(frontTotal);
+                        cur.backHalf.ud = processPerc(backTotal);
+                        for(let k=0; k<9; k++) {
+                            cur.holes[k].ud = String(row[colDetail + 1 + k] || '').trim();
+                            cur.holes[k+9].ud = String(row[colDetail + 11 + k] || '').trim();
+                        }
+                    } 
+                    else if (gVal === 'Panelty') {
+                        cur.penalties = totalNum;
+                        cur.frontHalf.penalties = frontTotal;
+                        cur.backHalf.penalties = backTotal;
+                        for(let k=0; k<9; k++) {
+                            cur.holes[k].penalty = parseFloat(row[colDetail + 1 + k]) || 0;
+                            cur.holes[k+9].penalty = parseFloat(row[colDetail + 11 + k]) || 0;
+                        }
+                    } 
+                    else if (gVal === 'Bunker') {
+                        cur.bunkerShots = totalNum;
+                        cur.frontHalf.bunkerShots = frontTotal;
+                        cur.backHalf.bunkerShots = backTotal;
+                        for(let k=0; k<9; k++) {
+                            cur.holes[k].bunker = parseFloat(row[colDetail + 1 + k]) || 0;
+                            cur.holes[k+9].bunker = parseFloat(row[colDetail + 11 + k]) || 0;
+                        }
+                    } 
+                    else if (fVal && fVal !== '송봉근' && fVal !== cur.frontNine && fVal !== '이름') {
+                        if (totalNum > 0 && totalNum < 200) {
+                            cur.partners.push({ name: fVal, score: totalNum });
+                        }
+                    }
+                }
+                
+                if (cur && cur.score > 0) rounds.push(cur);
+
+                if(rounds.length > 0) {
+                    setData(rounds);
+                    setDebugInfo(null);
+                } else {
+                    setDebugInfo({ headers: rawArray[headerRowIndex] || [], firstRow: rawArray[headerRowIndex + 1] || [] });
+                }
+                setIsLoading(false);
+            };
+
+            return (
+                <div className="flex h-screen overflow-hidden bg-gray-50 text-gray-800 font-sans relative">
+                    
+                    {isSidebarOpen && isMobile && (
+                        <div className="fixed inset-0 bg-black/50 z-20 md:hidden transition-opacity" onClick={() => setIsSidebarOpen(false)}></div>
+                    )}
+
+                    <div className={`bg-slate-900 text-white w-64 flex-shrink-0 transition-all duration-300 absolute md:relative h-full z-30 ${isSidebarOpen ? 'translate-x-0 shadow-2xl md:shadow-none' : '-translate-x-full md:translate-x-0 md:-ml-64'}`}>
+                        <div className="p-6">
+                            <h1 className="text-2xl font-bold tracking-tight text-emerald-400 flex items-center gap-2">
+                                <LucideIcon name="flag" className="w-6 h-6" />
+                                SCORECARD
+                            </h1>
+                            <p className="text-slate-400 text-xs mt-1">Smart Scorecard Analysis</p>
+                        </div>
+                        <nav className="mt-6 px-4 space-y-2">
+                            <button onClick={() => handleNavClick('dashboard')} className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-colors ${activeTab === 'dashboard' ? 'bg-emerald-500/20 text-emerald-400' : 'hover:bg-slate-800 text-slate-300'}`}>
+                                <LucideIcon name="layout-dashboard" className="w-5 h-5" />
+                                스코어 현황
+                            </button>
+                            <button onClick={() => handleNavClick('report')} className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-colors ${activeTab === 'report' ? 'bg-emerald-500/20 text-emerald-400' : 'hover:bg-slate-800 text-slate-300'}`}>
+                                <LucideIcon name="file-text" className="w-5 h-5" />
+                                분석 보고서
+                            </button>
+                            <button onClick={() => handleNavClick('course')} className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-colors ${activeTab === 'course' ? 'bg-emerald-500/20 text-emerald-400' : 'hover:bg-slate-800 text-slate-300'}`}>
+                                <LucideIcon name="map" className="w-5 h-5" />
+                                구장별 분석
+                            </button>
+                            <button onClick={() => handleNavClick('partner')} className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-colors ${activeTab === 'partner' ? 'bg-emerald-500/20 text-emerald-400' : 'hover:bg-slate-800 text-slate-300'}`}>
+                                <LucideIcon name="users" className="w-5 h-5" />
+                                동반자 매치 기록
+                            </button>
+                            
+                            <button onClick={() => handleNavClick('ai-upload')} className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-colors mt-4 border border-emerald-500/30 ${activeTab === 'ai-upload' ? 'bg-emerald-600 text-white shadow-lg shadow-emerald-900/50' : 'bg-gradient-to-r from-emerald-500/10 to-teal-500/10 hover:from-emerald-500/20 hover:to-teal-500/20 text-emerald-300'}`}>
+                                <LucideIcon name="sparkles" className="w-5 h-5 text-emerald-400" />
+                                AI 스코어 변환
+                            </button>
+                        </nav>
+                        
+                        <div className="absolute bottom-8 left-0 right-0 px-6">
+                            <label className="flex items-center justify-center gap-2 w-full bg-slate-800 hover:bg-slate-700 text-sm py-3 rounded-xl cursor-pointer transition-colors border border-slate-700 shadow-sm">
+                                <LucideIcon name="upload" className="w-4 h-4" />
+                                <span>엑셀 데이터 업로드</span>
+                                <input type="file" className="hidden" accept=".xlsx, .xls" onChange={handleFileUpload} />
+                            </label>
+                            <p className="text-xs text-center text-slate-500 mt-3 flex items-center justify-center gap-1">
+                                <span className="w-2 h-2 rounded-full bg-emerald-500"></span> Google Sheets 연동 중
+                            </p>
+                        </div>
+                    </div>
+
+                    <div className="flex-1 flex flex-col h-screen overflow-hidden relative">
+                        <header className="bg-white border-b border-gray-200 px-6 py-4 flex items-center justify-between z-10 flex-shrink-0">
+                            <div className="flex items-center gap-4">
+                                <button onClick={() => setIsSidebarOpen(!isSidebarOpen)} className="p-2 bg-gray-100 rounded-lg hover:bg-gray-200 transition-colors">
+                                    <LucideIcon name="menu" className="w-5 h-5" />
+                                </button>
+                                <h2 className="text-xl font-bold text-gray-800">
+                                    {activeTab === 'dashboard' && '연간/월간 트렌드'}
+                                    {activeTab === 'report' && '종합 분석 보고서'}
+                                    {activeTab === 'course' && '구장별 분석'}
+                                    {activeTab === 'partner' && '동반자 매치 기록'}
+                                    {activeTab === 'ai-upload' && '사진 스코어 변환'}
+                                </h2>
+                            </div>
+                            <div className="flex items-center gap-3 bg-gray-50 px-4 py-2 rounded-lg border border-gray-100">
+                                <span className="text-sm text-gray-500 font-medium">총 라운드: {data.length}회</span>
+                            </div>
+                        </header>
+
+                        <main className="flex-1 overflow-y-auto p-4 md:p-6 lg:p-8 custom-scrollbar">
+                            {isLoading ? (
+                                <div className="flex flex-col items-center justify-center h-full animate-pulse">
+                                    <LucideIcon name="loader-2" className="w-10 h-10 text-emerald-500 animate-spin mb-4" />
+                                    <p className="text-gray-500 font-medium">데이터를 불러오는 중입니다...</p>
+                                </div>
+                            ) : data.length === 0 ? (
+                                <div className="flex flex-col items-center justify-center h-full animate-fade-in mt-10">
+                                    <div className="bg-white p-10 rounded-3xl shadow-sm border border-gray-100 max-w-md w-full mx-auto text-center">
+                                        <div className="w-16 h-16 bg-emerald-100 text-emerald-500 rounded-full flex items-center justify-center mx-auto mb-6">
+                                            <LucideIcon name="file-spreadsheet" className="w-8 h-8" />
+                                        </div>
+                                        <h3 className="text-xl font-bold text-gray-800 mb-2">데이터를 찾을 수 없습니다</h3>
+                                        <p className="text-gray-500 text-sm mb-6 leading-relaxed">
+                                            구글 시트 연동에 실패했거나 데이터 양식이 맞지 않습니다.<br/>
+                                            좌측 하단의 버튼을 통해 엑셀 파일을 수동으로 업로드해주세요.
+                                        </p>
+                                        
+                                        {debugInfo && (
+                                            <div className="mt-4 p-4 bg-yellow-50 border border-yellow-200 rounded-xl text-left overflow-x-auto">
+                                                <h4 className="text-sm font-bold text-yellow-800 mb-2 flex items-center gap-2">
+                                                    <LucideIcon name="alert-triangle" className="w-4 h-4" />
+                                                    디버깅 정보 (시트 양식 불일치 의심)
+                                                </h4>
+                                                <p className="text-xs text-yellow-700 font-mono whitespace-pre-wrap">
+                                                    <strong>1번째 줄 (헤더):</strong> {JSON.stringify(debugInfo.headers)}
+                                                </p>
+                                                <p className="text-xs text-yellow-700 font-mono whitespace-pre-wrap mt-2">
+                                                    <strong>2번째 줄 (데이터):</strong> {JSON.stringify(debugInfo.firstRow)}
+                                                </p>
+                                            </div>
+                                        )}
+                                    </div>
+                                </div>
+                            ) : (
+                                <>
+                                    {activeTab === 'dashboard' && <DashboardTab data={data} />}
+                                    {activeTab === 'report' && <ReportTab data={data} />}
+                                    {activeTab === 'course' && <CourseTab data={data} />}
+                                    {activeTab === 'partner' && <PartnerTab data={data} />}
+                                    {activeTab === 'ai-upload' && <AIVisionUploadTab onSaveSuccess={fetchGoogleSheetData} />}
+                                </>
+                            )}
+                        </main>
+                    </div>
+                </div>
+            );
+        };
+
+        const PlusIcon = () => <svg xmlns="[http://www.w3.org/2000/svg](http://www.w3.org/2000/svg)" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>;
+        const MinusIcon = () => <svg xmlns="[http://www.w3.org/2000/svg](http://www.w3.org/2000/svg)" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="5" y1="12" x2="19" y2="12"></line></svg>;
+
+        const DashboardTab = ({ data }) => {
+            const [viewMode, setViewMode] = useState('year'); 
+            
+            const years = useMemo(() => {
+                return [...new Set(data.map(d => d.year))].filter(y => y && !isNaN(y) && parseInt(y) > 2000).sort((a,b)=> b-a);
+            }, [data]);
+
+            const [selectedYear, setSelectedYear] = useState('all');
+
+            const handleViewModeChange = (newMode) => {
+                setViewMode(newMode);
+                if (newMode !== 'year') {
+                    if (years.length > 0) setSelectedYear(years[0]);
+                } else {
+                    setSelectedYear('all');
+                }
+            };
+
+            const [expandedRounds, setExpandedRounds] = useState({});
+            const [expandedHalves, setExpandedHalves] = useState({});
+
+            const toggleRound = (idx) => setExpandedRounds(prev => ({...prev, [idx]: !prev[idx]}));
+            const toggleHalf = (idx, half) => setExpandedHalves(prev => ({...prev, [`${idx}-${half}`]: !prev[`${idx}-${half}`]}));
+
+            const isMobileView = window.innerWidth < 768;
+
+            const filteredData = useMemo(() => {
+                let fData = data;
+                if (selectedYear !== 'all') {
+                    fData = data.filter(d => d.year === selectedYear);
+                }
+                if (viewMode === 'quarter' && selectedYear !== 'all') {
+                    const selYearNum = parseInt(selectedYear, 10);
+                    fData = data.filter(d => parseInt(d.year, 10) > selYearNum - 3 && parseInt(d.year, 10) <= selYearNum);
+                }
+                return fData.sort((a,b) => new Date(a.date) - new Date(b.date));
+            }, [data, selectedYear, viewMode]);
+
+            const stats = useMemo(() => {
+                const count = filteredData.length || 1;
+                let puttsCount = 0, fwCount = 0, girCount = 0, udCount = 0;
+
+                const totals = filteredData.reduce((acc, d) => {
+                    acc.score += d.score;
+                    if (d.putts > 0) { acc.putts += d.putts; puttsCount++; }
+                    if (d.fwHit > 0) { acc.fw += d.fwHit; fwCount++; }
+                    if (d.gir > 0) { acc.gir += d.gir; girCount++; }
+                    if (d.ud > 0) { acc.ud += d.ud; udCount++; }
+                    return acc;
+                }, { score: 0, fw: 0, gir: 0, putts: 0, ud: 0 });
+
+                return {
+                    score: (totals.score / count).toFixed(1),
+                    putts: puttsCount > 0 ? (totals.putts / puttsCount).toFixed(1) : "0.0",
+                    fw: fwCount > 0 ? (totals.fw / fwCount).toFixed(1) : "0.0",
+                    gir: girCount > 0 ? (totals.gir / girCount).toFixed(1) : "0.0",
+                    ud: udCount > 0 ? (totals.ud / udCount).toFixed(1) : "0.0"
+                };
+            }, [filteredData]);
+
+            const trendData = useMemo(() => {
+                if (viewMode === 'round') {
+                    return filteredData.map((d) => ({ ...d, label: d.displayDate, monthGroup: d.month }));
+                }
+
+                const groupMap = {};
+                filteredData.forEach(d => {
+                    let key;
+                    if (viewMode === 'year') {
+                        key = d.year.substring(2) + "년";
+                    } else if (viewMode === 'month') {
+                        key = d.month.substring(5, 7) + '월';
+                    } else if (viewMode === 'quarter') {
+                        const m = parseInt(d.month.substring(5, 7), 10);
+                        const q = Math.floor((m - 1) / 3) + 1;
+                        key = `${d.year.substring(2)}-Q${q}`;
+                    }
+                    
+                    if (!groupMap[key]) {
+                        groupMap[key] = { 
+                            key, score: 0, count: 0,
+                            putts: 0, puttsCount: 0,
+                            fwHit: 0, fwHitCount: 0,
+                            gir: 0, girCount: 0,
+                            ud: 0, udCount: 0
+                        };
+                    }
+                    
+                    groupMap[key].score += d.score;
+                    groupMap[key].count += 1;
+                    
+                    if (d.putts > 0) { groupMap[key].putts += d.putts; groupMap[key].puttsCount += 1; }
+                    if (d.fwHit > 0) { groupMap[key].fwHit += d.fwHit; groupMap[key].fwHitCount += 1; }
+                    if (d.gir > 0) { groupMap[key].gir += d.gir; groupMap[key].girCount += 1; }
+                    if (d.ud > 0) { groupMap[key].ud += d.ud; groupMap[key].udCount += 1; }
+                });
+
+                return Object.values(groupMap).sort((a, b) => a.key.localeCompare(b.key)).map(g => ({
+                    label: g.key,
+                    score: parseFloat((g.score / g.count).toFixed(1)),
+                    putts: g.puttsCount > 0 ? parseFloat((g.putts / g.puttsCount).toFixed(1)) : 0,
+                    fwHit: g.fwHitCount > 0 ? parseFloat((g.fwHit / g.fwHitCount).toFixed(1)) : 0,
+                    gir: g.girCount > 0 ? parseFloat((g.gir / g.girCount).toFixed(1)) : 0,
+                    ud: g.udCount > 0 ? parseFloat((g.ud / g.udCount).toFixed(1)) : 0
+                }));
+            }, [filteredData, viewMode]);
+
+            const CustomizedXAxisTick = ({ x, y, payload }) => {
+                if (viewMode !== 'round') {
+                    return (
+                        <g transform={`translate(${x},${y})`}>
+                            <text x={0} y={0} dy={15} textAnchor="middle" fill="#888" fontSize={11}>{payload.value}</text>
+                        </g>
+                    );
+                }
+
+                const currentItem = trendData[payload.index];
+                const prevItem = payload.index > 0 ? trendData[payload.index - 1] : null;
+                const isFirstInMonth = !prevItem || prevItem.monthGroup !== currentItem?.monthGroup;
+                
+                let formattedMonth = '';
+                if (isFirstInMonth && currentItem?.monthGroup) {
+                    const monthStr = currentItem.monthGroup.split('-')[1];
+                    formattedMonth = `${parseInt(monthStr, 10)}월`;
+                }
+
+                return (
+                    <g transform={`translate(${x},${y})`}>
+                        <text x={0} y={0} dy={15} textAnchor="middle" fill="#4b5563" fontSize={10} fontWeight="500">
+                            {currentItem?.label}
+                        </text>
+                        {isFirstInMonth && currentItem?.monthGroup && (
+                            <text x={0} y={0} dy={30} textAnchor="middle" fill="#059669" fontSize={10} fontWeight="bold">
+                                {formattedMonth}
+                            </text>
+                        )}
+                    </g>
+                );
+            };
+
+            const chartMargin = { top: 25, right: isMobileView ? 5 : 20, left: isMobileView ? 5 : 20, bottom: viewMode === 'round' ? 30 : 15 };
+            const isSplitMode = viewMode !== 'year';
+            const chartHeight = viewMode === 'year' ? 250 : 300;
+
+            return (
+                <div className="space-y-4 animate-fade-in pb-10">
+                    <div className="flex flex-col md:flex-row gap-3 justify-between items-start md:items-center bg-white py-2.5 px-4 rounded-xl shadow-sm border border-gray-100">
+                        <div className="flex gap-1.5 bg-gray-50 p-1 rounded-lg border border-gray-200">
+                            <button onClick={()=>handleViewModeChange('year')} className={`px-4 py-1.5 rounded-md text-[13px] font-bold transition-all ${viewMode === 'year' ? 'bg-white text-emerald-600 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}>연간</button>
+                            <button onClick={()=>handleViewModeChange('month')} className={`px-4 py-1.5 rounded-md text-[13px] font-bold transition-all ${viewMode === 'month' ? 'bg-white text-emerald-600 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}>월간</button>
+                            <button onClick={()=>handleViewModeChange('quarter')} className={`px-4 py-1.5 rounded-md text-[13px] font-bold transition-all ${viewMode === 'quarter' ? 'bg-white text-emerald-600 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}>분기별</button>
+                            <button onClick={()=>handleViewModeChange('round')} className={`px-4 py-1.5 rounded-md text-[13px] font-bold transition-all ${viewMode === 'round' ? 'bg-white text-emerald-600 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}>라운드별</button>
+                        </div>
+                        
+                        <div className="flex items-center gap-2">
+                            <span className="text-[13px] font-bold text-gray-700">연도 선택:</span>
+                            <select 
+                                className="border border-gray-200 rounded-lg px-3 py-1.5 font-semibold text-[13px] text-gray-800 focus:ring-emerald-500 focus:border-emerald-500 outline-none bg-gray-50 hover:bg-white transition-colors cursor-pointer"
+                                value={selectedYear}
+                                onChange={(e) => { 
+                                    setSelectedYear(e.target.value); 
+                                    if(e.target.value !== 'all' && viewMode === 'year') setViewMode('month'); 
+                                }}
+                            >
+                                <option value="all">전체 연도</option>
+                                {years.map(y => <option key={y} value={y}>{y}년</option>)}
+                            </select>
+                        </div>
+                    </div>
+
+                    <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
+                        <StatCard title="평균 스코어" value={stats.score} suffix=" 타" color="blue" />
+                        <StatCard title="평균 퍼트수" value={stats.putts} suffix=" 개" color="orange" />
+                        <StatCard title="F/W 안착률" value={stats.fw} suffix=" %" color="emerald" />
+                        <StatCard title="GIR (그린적중)" value={stats.gir} suffix=" %" color="indigo" />
+                        <StatCard title="U/D" value={stats.ud} suffix=" %" color="purple" />
+                    </div>
+
+                    {!isSplitMode ? (
+                        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                            <div className="flex flex-col gap-6">
+                                <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100" style={{height: `${chartHeight}px`}}>
+                                    <h3 className="text-sm font-bold text-gray-800 mb-2">Score & Putts Trend</h3>
+                                    <ResponsiveContainer width="100%" height="88%">
+                                        <ComposedChart data={trendData} margin={chartMargin}>
+                                            <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
+                                            <XAxis dataKey="label" interval={0} tick={<CustomizedXAxisTick />} axisLine={false} tickLine={false} />
+                                            <YAxis yAxisId="left" domain={([dataMin, dataMax]) => {
+                                                const range = Math.max(dataMax - dataMin, 8); 
+                                                const totalSpan = range / 0.45; 
+                                                return [Math.max(0, Math.floor(dataMin - (totalSpan * 0.40))), Math.ceil(dataMax + (totalSpan * 0.15))];
+                                            }} axisLine={false} tickLine={false} tick={false} width={1} />
+                                            <YAxis yAxisId="right" orientation="right" domain={[0, 180]} axisLine={false} tickLine={false} tick={false} width={1} />
+                                            <Tooltip cursor={{fill: '#f8fafc'}} contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)' }} />
+                                            <Bar yAxisId="right" name="퍼트수" dataKey="putts" fill="#fdba74" radius={[4, 4, 0, 0]} barSize={isMobileView ? 10 : 16} opacity={0.9}>
+                                                <LabelList dataKey="putts" position="top" fontSize={11} fill="#ea580c" fontWeight="bold" />
+                                            </Bar>
+                                            <Line yAxisId="left" type="monotone" name="스코어" dataKey="score" stroke="#3b82f6" strokeWidth={3} dot={{r: 4, strokeWidth: 2}} activeDot={{r: 6}}>
+                                                <LabelList dataKey="score" position="top" offset={10} fontSize={12} fill="#2563eb" fontWeight="900" />
+                                            </Line>
+                                        </ComposedChart>
+                                    </ResponsiveContainer>
+                                </div>
+
+                                <div className="bg-white p-5 rounded-2xl shadow-sm border border-gray-100" style={{height: `${chartHeight}px`}}>
+                                    <h3 className="text-sm font-bold text-gray-800 mb-2">F/W Hit Trend</h3>
+                                    <ResponsiveContainer width="100%" height="88%">
+                                        <LineChart data={trendData} margin={chartMargin}>
+                                            <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
+                                            <XAxis dataKey="label" interval={0} tick={<CustomizedXAxisTick />} axisLine={false} tickLine={false} />
+                                            <YAxis domain={[dataMin => Math.max(0, Math.floor(dataMin - 10)), dataMax => Math.min(100, Math.ceil(dataMax + 10))]} axisLine={false} tickLine={false} tick={false} width={1} />
+                                            <Tooltip cursor={{stroke: '#e2e8f0', strokeWidth: 2}} contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }} />
+                                            <Line type="monotone" name="F/W Hit (%)" dataKey="fwHit" stroke="#10b981" strokeWidth={3} dot={{r: 3}} activeDot={{r: 5}}>
+                                                <LabelList dataKey="fwHit" position="top" offset={8} fontSize={10} fill="#059669" fontWeight="bold" />
+                                            </Line>
+                                        </LineChart>
+                                    </ResponsiveContainer>
+                                </div>
+                            </div>
+
+                            <div className="flex flex-col gap-6">
+                                <div className="bg-white p-5 rounded-2xl shadow-sm border border-gray-100" style={{height: `${chartHeight}px`}}>
+                                    <h3 className="text-sm font-bold text-gray-800 mb-2">GIR Trend</h3>
+                                    <ResponsiveContainer width="100%" height="88%">
+                                        <LineChart data={trendData} margin={chartMargin}>
+                                            <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
+                                            <XAxis dataKey="label" interval={0} tick={<CustomizedXAxisTick />} axisLine={false} tickLine={false} />
+                                            <YAxis domain={[dataMin => Math.max(0, Math.floor(dataMin - 10)), dataMax => Math.min(100, Math.ceil(dataMax + 10))]} axisLine={false} tickLine={false} tick={false} width={1} />
+                                            <Tooltip cursor={{stroke: '#e2e8f0', strokeWidth: 2}} contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }} />
+                                            <Line type="monotone" name="GIR (%)" dataKey="gir" stroke="#6366f1" strokeWidth={3} dot={{r: 3}} activeDot={{r: 5}}>
+                                                <LabelList dataKey="gir" position="top" offset={8} fontSize={10} fill="#4f46e5" fontWeight="bold" />
+                                            </Line>
+                                        </LineChart>
+                                    </ResponsiveContainer>
+                                </div>
+
+                                <div className="bg-white p-5 rounded-2xl shadow-sm border border-gray-100" style={{height: `${chartHeight}px`}}>
+                                    <h3 className="text-sm font-bold text-gray-800 mb-2">U/D Trend</h3>
+                                    <ResponsiveContainer width="100%" height="88%">
+                                        <LineChart data={trendData} margin={chartMargin}>
+                                            <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
+                                            <XAxis dataKey="label" interval={0} tick={<CustomizedXAxisTick />} axisLine={false} tickLine={false} />
+                                            <YAxis domain={[dataMin => Math.max(0, Math.floor(dataMin - 10)), dataMax => Math.min(100, Math.ceil(dataMax + 10))]} axisLine={false} tickLine={false} tick={false} width={1} />
+                                            <Tooltip cursor={{stroke: '#e2e8f0', strokeWidth: 2}} contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }} />
+                                            <Line type="monotone" name="U/D (%)" dataKey="ud" stroke="#8b5cf6" strokeWidth={3} dot={{r: 3}} activeDot={{r: 5}}>
+                                                <LabelList dataKey="ud" position="top" offset={8} fontSize={10} fill="#7c3aed" fontWeight="bold" />
+                                            </Line>
+                                        </LineChart>
+                                    </ResponsiveContainer>
+                                </div>
+                            </div>
+                        </div>
+                    ) : (
+                        <div className="grid grid-cols-1 lg:grid-cols-12 gap-5">
+                            <div className="lg:col-span-7 flex flex-col gap-4">
+                                <div className="bg-white p-4 rounded-xl shadow-sm border border-gray-100 h-[260px]">
+                                    <h3 className="text-[13px] font-bold text-gray-800 mb-1">Score & Putts Trend</h3>
+                                    <ResponsiveContainer width="100%" height="90%">
+                                        <ComposedChart data={trendData} margin={chartMargin}>
+                                            <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
+                                            <XAxis dataKey="label" interval={0} tick={<CustomizedXAxisTick />} axisLine={false} tickLine={false} />
+                                            <YAxis yAxisId="left" domain={([dataMin, dataMax]) => {
+                                                const range = Math.max(dataMax - dataMin, 8);
+                                                const totalSpan = range / 0.45;
+                                                return [Math.max(0, Math.floor(dataMin - (totalSpan * 0.40))), Math.ceil(dataMax + (totalSpan * 0.15))];
+                                            }} axisLine={false} tickLine={false} tick={false} width={1} />
+                                            <YAxis yAxisId="right" orientation="right" domain={[0, 180]} axisLine={false} tickLine={false} tick={false} width={1} />
+                                            <Tooltip cursor={{fill: '#f8fafc'}} contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)' }} />
+                                            <Bar yAxisId="right" name="퍼트수" dataKey="putts" fill="#fdba74" radius={[4, 4, 0, 0]} barSize={isMobileView ? 10 : 16} opacity={0.9}>
+                                                <LabelList dataKey="putts" position="top" fontSize={11} fill="#ea580c" fontWeight="bold" />
+                                            </Bar>
+                                            <Line yAxisId="left" type="monotone" name="스코어" dataKey="score" stroke="#3b82f6" strokeWidth={3} dot={{r: 4, strokeWidth: 2}} activeDot={{r: 6}}>
+                                                <LabelList dataKey="score" position="top" offset={10} fontSize={12} fill="#2563eb" fontWeight="900" />
+                                            </Line>
+                                        </ComposedChart>
+                                    </ResponsiveContainer>
+                                </div>
+
+                                <div className="bg-white p-4 rounded-xl shadow-sm border border-gray-100 h-[180px]">
+                                    <h3 className="text-[13px] font-bold text-gray-800 mb-1">F/W Hit Trend</h3>
+                                    <ResponsiveContainer width="100%" height="90%">
+                                        <LineChart data={trendData} margin={chartMargin}>
+                                            <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
+                                            <XAxis dataKey="label" interval={0} tick={<CustomizedXAxisTick />} axisLine={false} tickLine={false} />
+                                            <YAxis domain={[dataMin => Math.max(0, Math.floor(dataMin - 10)), dataMax => Math.min(100, Math.ceil(dataMax + 10))]} axisLine={false} tickLine={false} tick={false} width={1} />
+                                            <Tooltip cursor={{stroke: '#e2e8f0', strokeWidth: 2}} contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }} />
+                                            <Line type="monotone" name="F/W Hit (%)" dataKey="fwHit" stroke="#10b981" strokeWidth={3} dot={{r: 3}} activeDot={{r: 5}}>
+                                                <LabelList dataKey="fwHit" position="top" offset={8} fontSize={10} fill="#059669" fontWeight="bold" />
+                                            </Line>
+                                        </LineChart>
+                                    </ResponsiveContainer>
+                                </div>
+
+                                <div className="bg-white p-4 rounded-xl shadow-sm border border-gray-100 h-[180px]">
+                                    <h3 className="text-[13px] font-bold text-gray-800 mb-1">GIR Trend</h3>
+                                    <ResponsiveContainer width="100%" height="90%">
+                                        <LineChart data={trendData} margin={chartMargin}>
+                                            <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
+                                            <XAxis dataKey="label" interval={0} tick={<CustomizedXAxisTick />} axisLine={false} tickLine={false} />
+                                            <YAxis domain={[dataMin => Math.max(0, Math.floor(dataMin - 10)), dataMax => Math.min(100, Math.ceil(dataMax + 10))]} axisLine={false} tickLine={false} tick={false} width={1} />
+                                            <Tooltip cursor={{stroke: '#e2e8f0', strokeWidth: 2}} contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }} />
+                                            <Line type="monotone" name="GIR (%)" dataKey="gir" stroke="#6366f1" strokeWidth={3} dot={{r: 3}} activeDot={{r: 5}}>
+                                                <LabelList dataKey="gir" position="top" offset={8} fontSize={10} fill="#4f46e5" fontWeight="bold" />
+                                            </Line>
+                                        </LineChart>
+                                    </ResponsiveContainer>
+                                </div>
+                                
+                                <div className="bg-white p-4 rounded-xl shadow-sm border border-gray-100 h-[180px]">
+                                    <h3 className="text-[13px] font-bold text-gray-800 mb-1">U/D Trend</h3>
+                                    <ResponsiveContainer width="100%" height="90%">
+                                        <LineChart data={trendData} margin={chartMargin}>
+                                            <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
+                                            <XAxis dataKey="label" interval={0} tick={<CustomizedXAxisTick />} axisLine={false} tickLine={false} />
+                                            <YAxis domain={[dataMin => Math.max(0, Math.floor(dataMin - 10)), dataMax => Math.min(100, Math.ceil(dataMax + 10))]} axisLine={false} tickLine={false} tick={false} width={1} />
+                                            <Tooltip cursor={{stroke: '#e2e8f0', strokeWidth: 2}} contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }} />
+                                            <Line type="monotone" name="U/D (%)" dataKey="ud" stroke="#8b5cf6" strokeWidth={3} dot={{r: 3}} activeDot={{r: 5}}>
+                                                <LabelList dataKey="ud" position="top" offset={8} fontSize={10} fill="#7c3aed" fontWeight="bold" />
+                                            </Line>
+                                        </LineChart>
+                                    </ResponsiveContainer>
+                                </div>
+                            </div>
+
+                            <div className="lg:col-span-5 bg-white rounded-xl shadow-sm border border-gray-100 flex flex-col h-[848px] overflow-hidden">
+                                <div className="p-5 border-b border-gray-100 bg-gray-50/50">
+                                    <h3 className="text-lg font-bold text-gray-800">
+                                        {selectedYear !== 'all' ? `${selectedYear}년` : '전체'} 라운드 상세
+                                    </h3>
+                                </div>
+                                <div className="flex-1 overflow-y-auto custom-scrollbar">
+                                    <table className="w-full text-sm text-left">
+                                        <thead className="text-[11px] text-gray-400 uppercase bg-white sticky top-0 z-10 shadow-sm">
+                                            <tr>
+                                                <th className="px-2 sm:px-4 py-3 font-semibold whitespace-nowrap">날짜</th>
+                                                <th className="px-2 sm:px-4 py-3 font-semibold whitespace-nowrap">구장</th>
+                                                <th className="px-1 sm:px-3 py-3 text-center font-semibold whitespace-nowrap">스코어</th>
+                                                <th className="px-1 sm:px-2 py-3 text-center font-semibold whitespace-nowrap">F/W</th>
+                                                <th className="px-1 sm:px-2 py-3 text-center font-semibold whitespace-nowrap">GIR</th>
+                                                <th className="px-1 sm:px-2 py-3 text-center font-semibold whitespace-nowrap">퍼트</th>
+                                                <th className="px-1 sm:px-2 py-3 text-center font-semibold whitespace-nowrap">벌타</th>
+                                                <th className="px-1 sm:px-2 py-3 text-center font-semibold whitespace-nowrap">벙커</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody className="divide-y divide-gray-50">
+                                            {filteredData.slice().reverse().map((row, idx) => (
+                                                <React.Fragment key={idx}>
+                                                    <tr className="bg-white hover:bg-emerald-50/30 transition-colors cursor-pointer group">
+                                                        <td className="px-2 sm:px-4 py-3 font-medium text-gray-600 flex items-center gap-1 sm:gap-2 text-xs whitespace-nowrap">
+                                                            <button onClick={() => toggleRound(idx)} className="p-1 rounded-md bg-gray-50 border border-gray-200 group-hover:bg-emerald-100 group-hover:border-emerald-200 group-hover:text-emerald-600 transition-colors shrink-0">
+                                                                {expandedRounds[idx] ? <MinusIcon /> : <PlusIcon />}
+                                                            </button>
+                                                            <span>{row.date.substring(2)}</span>
+                                                        </td>
+                                                        <td className="px-2 sm:px-4 py-3 font-bold text-gray-800 truncate max-w-[80px] sm:max-w-[100px]">{row.courseName}</td>
+                                                        <td className="px-1 sm:px-3 py-3 text-center font-black text-blue-600 text-sm whitespace-nowrap">{row.score}</td>
+                                                        <td className="px-1 sm:px-2 py-3 text-center text-[10px] sm:text-xs text-gray-500 whitespace-nowrap">{row.fwHit}%</td>
+                                                        <td className="px-1 sm:px-2 py-3 text-center text-[10px] sm:text-xs text-gray-500 whitespace-nowrap">{row.gir}%</td>
+                                                        <td className="px-1 sm:px-2 py-3 text-center text-[10px] sm:text-xs text-gray-600 font-medium whitespace-nowrap">{row.putts}</td>
+                                                        <td className="px-1 sm:px-2 py-3 text-center text-[10px] sm:text-xs font-bold text-red-400 whitespace-nowrap">{row.penalties}</td>
+                                                        <td className="px-1 sm:px-2 py-3 text-center text-[10px] sm:text-xs font-bold text-yellow-500 whitespace-nowrap">{row.bunkerShots}</td>
+                                                    </tr>
+                                                    
+                                                    {expandedRounds[idx] && (
+                                                        <>
+                                                            <tr className="bg-slate-50 text-xs border-b border-gray-100">
+                                                                <td className="px-4 py-2 pl-12 flex items-center gap-2">
+                                                                    <button onClick={() => toggleHalf(idx, 'front')} className="p-0.5 rounded bg-white border border-gray-300 text-gray-400">
+                                                                        {expandedHalves[`${idx}-front`] ? <MinusIcon /> : <PlusIcon />}
+                                                                    </button>
+                                                                    <span className="text-gray-400 font-medium whitespace-nowrap">전반:</span>
+                                                                </td>
+                                                                <td className="px-4 py-2 font-bold text-gray-700 truncate max-w-[80px]">{row.frontHalf?.course || row.frontNine}</td>
+                                                                <td className="px-3 py-2 text-center font-bold text-blue-500">{row.frontHalf?.score}</td>
+                                                                <td className="px-2 py-2 text-center text-gray-400">{row.frontHalf?.fwHit}%</td>
+                                                                <td className="px-2 py-2 text-center text-gray-400">{row.frontHalf?.gir}%</td>
+                                                                <td className="px-2 py-2 text-center text-gray-500">{row.frontHalf?.putts}</td>
+                                                                <td className="px-2 py-2 text-center text-red-300">{row.frontHalf?.penalties}</td>
+                                                                <td className="px-2 py-2 text-center text-yellow-400">{row.frontHalf?.bunkerShots}</td>
+                                                            </tr>
+                                                            {expandedHalves[`${idx}-front`] && (
+                                                                <tr><td colSpan={8} className="p-4 bg-gray-100/50"><HoleTable holes={row.holes?.slice(0, 9) || []} /></td></tr>
+                                                            )}
+
+                                                            <tr className="bg-slate-50 text-xs border-b border-gray-100">
+                                                                <td className="px-4 py-2 pl-12 flex items-center gap-2">
+                                                                    <button onClick={() => toggleHalf(idx, 'back')} className="p-0.5 rounded bg-white border border-gray-300 text-gray-400">
+                                                                        {expandedHalves[`${idx}-back`] ? <MinusIcon /> : <PlusIcon />}
+                                                                    </button>
+                                                                    <span className="text-gray-400 font-medium whitespace-nowrap">후반:</span>
+                                                                </td>
+                                                                <td className="px-4 py-2 font-bold text-gray-700 truncate max-w-[80px]">{row.backHalf?.course || row.backNine}</td>
+                                                                <td className="px-3 py-2 text-center font-bold text-blue-500">{row.backHalf?.score}</td>
+                                                                <td className="px-2 py-2 text-center text-gray-400">{row.backHalf?.fwHit}%</td>
+                                                                <td className="px-2 py-2 text-center text-gray-400">{row.backHalf?.gir}%</td>
+                                                                <td className="px-2 py-2 text-center text-gray-500">{row.backHalf?.putts}</td>
+                                                                <td className="px-2 py-2 text-center text-red-300">{row.backHalf?.penalties}</td>
+                                                                <td className="px-2 py-2 text-center text-yellow-400">{row.backHalf?.bunkerShots}</td>
+                                                            </tr>
+                                                            {expandedHalves[`${idx}-back`] && (
+                                                                <tr><td colSpan={8} className="p-4 bg-gray-100/50"><HoleTable holes={row.holes?.slice(9, 18) || []} /></td></tr>
+                                                            )}
+                                                        </>
+                                                    )}
+                                                </React.Fragment>
+                                            ))}
+                                        </tbody>
+                                    </table>
+                                </div>
+                            </div>
+                        </div>
+                    )}
+                </div>
+            );
+        };
+
+        const CourseTab = ({ data }) => {
+            const courseCounts = useMemo(() => {
+                const map = {};
+                data.forEach(d => {
+                    map[d.courseName] = (map[d.courseName] || 0) + 1;
+                });
+                return Object.entries(map).sort((a, b) => b[1] - a[1]).map(entry => ({
+                    name: entry[0],
+                    count: entry[1]
+                }));
+            }, [data]);
+
+            const [selectedCourse, setSelectedCourse] = useState(courseCounts[0]?.name || "");
+
+            useEffect(() => {
+                if (courseCounts.length > 0 && !courseCounts.find(c => c.name === selectedCourse)) {
+                    setSelectedCourse(courseCounts[0].name);
+                }
+            }, [courseCounts]);
+
+            const [expandedRounds, setExpandedRounds] = useState({});
+            const [expandedHalves, setExpandedHalves] = useState({});
+
+            const toggleRound = (idx) => setExpandedRounds(prev => ({...prev, [idx]: !prev[idx]}));
+            const toggleHalf = (idx, half) => setExpandedHalves(prev => ({...prev, [`${idx}-${half}`]: !prev[`${idx}-${half}`]}));
+
+            const courseData = useMemo(() => {
+                return data.filter(d => d.courseName === selectedCourse).sort((a,b) => new Date(b.date) - new Date(a.date));
+            }, [data, selectedCourse]);
+
+            const stats = useMemo(() => {
+                const count = courseData.length || 1;
+                let puttsCount = 0, fwCount = 0, girCount = 0;
+                
+                const totals = courseData.reduce((acc, d) => {
+                    acc.score += d.score;
+                    acc.penalties += d.penalties;
+                    acc.bunkers += d.bunkerShots;
+                    if (d.putts > 0) { acc.putts += d.putts; puttsCount++; }
+                    if (d.fwHit > 0) { acc.fw += d.fwHit; fwCount++; }
+                    if (d.gir > 0) { acc.gir += d.gir; girCount++; }
+                    return acc;
+                }, { score: 0, fw: 0, gir: 0, putts: 0, penalties: 0, bunkers: 0 });
+
+                return {
+                    score: (totals.score / count).toFixed(1),
+                    rounds: courseData.length,
+                    fw: fwCount > 0 ? (totals.fw / fwCount).toFixed(1) : "0.0",
+                    gir: girCount > 0 ? (totals.gir / girCount).toFixed(1) : "0.0",
+                    putts: puttsCount > 0 ? (totals.putts / puttsCount).toFixed(1) : "0.0",
+                    penalties: (totals.penalties / count).toFixed(1),
+                    bunkers: (totals.bunkers / count).toFixed(1)
+                };
+            }, [courseData]);
+
+            const courseStats = useMemo(() => {
+                const map = {};
+                courseData.forEach(round => {
+                    const processHalf = (halfData, holesData) => {
+                        const cName = halfData.course || 'Unknown';
+                        if (!map[cName]) {
+                            map[cName] = { 
+                                name: cName, count: 0,
+                                par: 0, score: 0, fw: 0, gir: 0, putts: 0, penalty: 0, bunker: 0,
+                                holes: Array.from({length: 9}, ()=>({ par:0, score:0, fw:0, gir:0, putts:0, penalty:0, bunker:0, count:0 })) 
+                            };
+                        }
+                        const st = map[cName];
+                        st.count += 1;
+                        
+                        holesData.forEach((h, i) => {
+                            if (!h) return;
+                            const hSt = st.holes[i];
+                            hSt.count += 1;
+                            hSt.par += (h.par || 0);
+                            hSt.score += (h.score || 0);
+                            hSt.putts += (h.putts || 0);
+                            hSt.penalty += (h.penalty || 0);
+                            hSt.bunker += (h.bunker || 0);
+                            if (h.fw === 'Y') hSt.fw += 1;
+                            if (h.gir === 'Y') hSt.gir += 1;
+                            
+                            st.par += (h.par || 0);
+                            st.score += (h.score || 0);
+                            st.putts += (h.putts || 0);
+                            st.penalty += (h.penalty || 0);
+                            st.bunker += (h.bunker || 0);
+                            if (h.fw === 'Y') st.fw += 1;
+                            if (h.gir === 'Y') st.gir += 1;
+                        });
+                    };
+                    
+                    if (round.frontHalf) processHalf(round.frontHalf, round.holes.slice(0, 9));
+                    if (round.backHalf) processHalf(round.backHalf, round.holes.slice(9, 18));
+                });
+
+                return Object.values(map).map(c => {
+                    c.avgPar = c.count ? Math.round(c.par / c.count) : 0;
+                    c.avgScore = c.count ? (c.score / c.count).toFixed(1) : 0;
+                    c.avgFw = c.count ? Math.round((c.fw / (c.count * 7)) * 100) : 0;
+                    c.avgGir = c.count ? Math.round((c.gir / (c.count * 9)) * 100) : 0;
+                    c.avgPutts = c.count ? (c.putts / c.count).toFixed(1) : 0;
+                    c.avgPenalty = c.count ? (c.penalty / c.count).toFixed(1) : 0;
+                    c.avgBunker = c.count ? (c.bunker / c.count).toFixed(1) : 0;
+
+                    c.holes = c.holes.map(h => ({
+                        par: h.count ? Math.round(h.par / h.count) : 0,
+                        score: h.count ? (h.score / h.count).toFixed(1) : 0,
+                        fw: h.count ? Math.round((h.fw / h.count) * 100) : 0,
+                        gir: h.count ? Math.round((h.gir / h.count) * 100) : 0,
+                        putts: h.count ? (h.putts / h.count).toFixed(1) : 0,
+                        penalty: h.count ? (h.penalty / h.count).toFixed(1) : 0,
+                        bunker: h.count ? (h.bunker / h.count).toFixed(1) : 0,
+                    }));
+                    return c;
+                });
+            }, [courseData]);
+
+            const aiInsights = useMemo(() => {
+                if (!courseData || courseData.length === 0) return null;
+
+                const holeStats = {};
+                const birdieMap = {};
+
+                courseData.forEach(round => {
+                    const processHoles = (courseName, holes) => {
+                        if(!courseName || courseName.trim() === '') return;
+                        holes.forEach((h, i) => {
+                            if (!h || !h.par || h.par === 0) return;
+                            
+                            const relativeHoleNo = i + 1; 
+                            const key = `${courseName} ${relativeHoleNo}H`;
+                            
+                            if (!holeStats[key]) {
+                                holeStats[key] = { key, courseName, holeNo: relativeHoleNo, count: 0, par: 0, score: 0, putts: 0, fwHit: 0, fwTotal: 0, girHit: 0, girTotal: 0, penalty: 0, bunker: 0, birdies: 0 };
+                            }
+                            const stat = holeStats[key];
+                            stat.count++;
+                            stat.par += h.par;
+                            stat.score += h.score;
+                            stat.putts += h.putts;
+                            stat.penalty += h.penalty;
+                            stat.bunker += h.bunker;
+                            
+                            if (h.score < h.par && h.score > 0) { 
+                                stat.birdies++; 
+                                if (!birdieMap[courseName]) birdieMap[courseName] = {};
+                                birdieMap[courseName][relativeHoleNo] = (birdieMap[courseName][relativeHoleNo] || 0) + 1;
+                            }
+                            if (h.fw === 'Y' || h.fw === 'N') stat.fwTotal++;
+                            if (h.fw === 'Y') stat.fwHit++;
+                            if (h.gir === 'Y' || h.gir === 'N') stat.girTotal++;
+                            if (h.gir === 'Y') stat.girHit++;
+                        });
+                    };
+                    if (round.frontHalf) processHoles(round.frontHalf.course || round.frontNine, round.holes.slice(0, 9));
+                    if (round.backHalf) processHoles(round.backHalf.course || round.backNine, round.holes.slice(9, 18));
+                });
+
+                const statsArray = Object.values(holeStats).map(st => {
+                    const avgScore = st.score / st.count;
+                    const par = st.par / st.count;
+                    return {
+                        ...st,
+                        avgScore,
+                        par,
+                        overPar: avgScore - par,
+                        avgPutts: st.putts / st.count,
+                        fwRate: st.fwTotal > 0 ? (st.fwHit / st.fwTotal) * 100 : 0,
+                        girRate: st.girTotal > 0 ? (st.girHit / st.girTotal) * 100 : 0,
+                        avgPenalty: st.penalty / st.count,
+                    };
+                }).filter(st => st.count > 0);
+
+                statsArray.sort((a, b) => b.overPar - a.overPar); 
+
+                const worstHoles = statsArray.slice(0, 3);
+                const bestHoles = [...statsArray].sort((a, b) => a.overPar - b.overPar).slice(0, 3);
+
+                const generateReason = (st, isWorst) => {
+                    const reasons = [];
+                    if (isWorst) {
+                        if (st.avgPenalty >= 0.5) reasons.push(`벌타(${st.avgPenalty.toFixed(1)}개)`);
+                        if (st.fwRate < 40 && st.fwTotal > 0) reasons.push(`F/W(${st.fwRate.toFixed(0)}%)`);
+                        if (st.girRate < 30 && st.girTotal > 0) reasons.push(`GIR(${st.girRate.toFixed(0)}%)`);
+                        if (st.avgPutts >= 2.2) reasons.push(`퍼트(${st.avgPutts.toFixed(1)}개)`);
+                    } else {
+                        if (st.girRate >= 60 && st.girTotal > 0) reasons.push(`GIR(${st.girRate.toFixed(0)}%)`);
+                        if (st.fwRate >= 70 && st.fwTotal > 0) reasons.push(`F/W(${st.fwRate.toFixed(0)}%)`);
+                        if (st.avgPutts <= 1.8) reasons.push(`정밀한 퍼트`);
+                    }
+                    return reasons.length > 0 ? reasons.join(', ') + (isWorst ? ' 영향' : '로 방어') : (isWorst ? '전반적 샷 난조' : '안정적인 플레이');
+                };
+
+                worstHoles.forEach(st => st.reason = generateReason(st, true));
+                bestHoles.forEach(st => st.reason = generateReason(st, false));
+
+                const formattedBirdies = Object.keys(birdieMap).sort().map(cName => {
+                    const holesObj = birdieMap[cName];
+                    const holesStr = Object.keys(holesObj)
+                        .map(Number)
+                        .sort((a,b) => a - b)
+                        .map(hNum => {
+                            const cnt = holesObj[hNum];
+                            return `${hNum}H${cnt > 1 ? `(${cnt}회)` : ''}`;
+                        })
+                        .join(', ');
+                    return `${cName} : ${holesStr}`;
+                });
+
+                let totals = { score: 0, putts: 0, fwHit: 0, fwCount: 0, gir: 0, girCount: 0, penalties: 0, bunkers: 0, ud: 0, udCount: 0 };
+                courseData.forEach(d => {
+                    totals.score += d.score;
+                    if (d.putts > 0) totals.putts += d.putts;
+                    if (d.fwHit > 0) { totals.fwHit += d.fwHit; totals.fwCount++; }
+                    if (d.gir > 0) { totals.gir += d.gir; totals.girCount++; }
+                    if (d.ud > 0) { totals.ud += d.ud; totals.udCount++; }
+                    totals.penalties += d.penalties;
+                    totals.bunkers += d.bunkerShots;
+                });
+
+                const count = courseData.length || 1;
+                const crStats = {
+                    avgScore: (totals.score / count).toFixed(1),
+                    avgPutts: (totals.putts / count).toFixed(1),
+                    fwRate: totals.fwCount ? Math.round(totals.fwHit / totals.fwCount) : 0,
+                    girRate: totals.girCount ? Math.round(totals.gir / totals.girCount) : 0,
+                    udRate: totals.udCount ? Math.round(totals.ud / totals.udCount) : 0,
+                    avgPenalty: (totals.penalties / count).toFixed(1)
+                };
+
+                let strengths = [];
+                let weaknesses = [];
+                if (crStats.fwRate >= 55) strengths.push({ title: "안정적인 티샷", desc: `페어웨이 안착률이 ${crStats.fwRate}%로 평균 이상입니다.` });
+                if (crStats.girRate >= 40) strengths.push({ title: "날카로운 아이언", desc: `그린 적중률(GIR) ${crStats.girRate}%로 훌륭한 샷 밸런스를 유지합니다.` });
+                if (parseFloat(crStats.avgPutts) <= 35) strengths.push({ title: "정교한 퍼팅", desc: `평균 퍼트 수가 ${crStats.avgPutts}개로 준수합니다.` });
+                if (parseFloat(crStats.avgPenalty) <= 1.0) strengths.push({ title: "스마트한 코스 매니지먼트", desc: `평균 벌타가 ${crStats.avgPenalty}개 수준으로 영리하게 플레이합니다.` });
+                if (crStats.udRate >= 25) strengths.push({ title: "뛰어난 위기 관리", desc: `U/D 성공률이 ${crStats.udRate}%로 매우 우수합니다.` });
+
+                if (crStats.fwRate < 50 && totals.fwCount > 0) weaknesses.push({ title: "티샷 방향성 기복", desc: `페어웨이 안착률(${crStats.fwRate}%)이 아쉽습니다.` });
+                if (crStats.girRate < 35 && totals.girCount > 0) weaknesses.push({ title: "아이언 정확도 불안", desc: `그린 적중률(${crStats.girRate}%)이 낮아 숏게임 부담이 큽니다.` });
+                if (parseFloat(crStats.avgPutts) >= 36) weaknesses.push({ title: "퍼팅 거리감 아쉬움", desc: `평균 퍼트 수(${crStats.avgPutts}개)가 많아 스코어 손실이 있습니다.` });
+                if (parseFloat(crStats.avgPenalty) >= 1.5) weaknesses.push({ title: "페널티 누적", desc: `평균 벌타가 ${crStats.avgPenalty}개로 리스크 관리가 필요합니다.` });
+                if (crStats.udRate < 20 && totals.udCount > 0) weaknesses.push({ title: "숏게임 불안", desc: `U/D 성공률(${crStats.udRate}%)이 낮아 파 세이브에 어려움이 있습니다.` });
+
+                if (strengths.length === 0) strengths.push({ title: "무난한 플레이 흐름", desc: "크게 흔들림 없이 안정적인 템포를 유지 중입니다." });
+                if (weaknesses.length === 0) weaknesses.push({ title: "기록 유지", desc: "전반적인 지표가 준수합니다. 현재 페이스를 유지하세요." });
+
+                const radarData = [
+                    { subject: '정확도(FW)', A: crStats.fwRate || 0, fullMark: 100 },
+                    { subject: '아이언(GIR)', A: crStats.girRate || 0, fullMark: 100 },
+                    { subject: '스코어', A: Math.max(0, 100 - (parseFloat(crStats.avgScore) - 72) * 2), fullMark: 100 }, 
+                    { subject: '안정성(Pen)', A: Math.max(0, 100 - (parseFloat(crStats.avgPenalty) * 15)), fullMark: 100 },
+                    { subject: '퍼팅', A: Math.max(0, 100 - (parseFloat(crStats.avgPutts) - 28) * 3), fullMark: 100 }, 
+                    { subject: '위기관리(UD)', A: crStats.udRate || 0, fullMark: 100 }
+                ];
+
+                return { worstHoles, bestHoles, birdies: formattedBirdies, report: { strengths, weaknesses, radarData } };
+            }, [courseData]);
+
+            return (
+                <div className="flex flex-col xl:flex-row gap-4 animate-fade-in pb-10">
+                    <div className="w-full xl:w-1/2 flex flex-col gap-4">
+                        <div className="bg-white p-4 rounded-2xl shadow-sm border border-gray-100 flex flex-col gap-3">
+                            <div className="flex items-center gap-2.5">
+                                <div className="p-2 bg-emerald-100 text-emerald-600 rounded-xl">
+                                    <LucideIcon name="map-pin" className="w-5 h-5" />
+                                </div>
+                                <h3 className="text-base font-bold text-gray-800">분석할 구장 선택</h3>
+                            </div>
+                            <select 
+                                className="w-full border-2 border-gray-200 rounded-xl px-3 py-1.5 font-bold text-gray-800 text-base focus:ring-emerald-500 focus:border-emerald-500 outline-none bg-gray-50 hover:bg-white transition-colors cursor-pointer"
+                                value={selectedCourse}
+                                onChange={(e) => setSelectedCourse(e.target.value)}
+                            >
+                                {courseCounts.map(c => <option key={c.name} value={c.name}>{c.name} ({c.count}회 플레이)</option>)}
+                            </select>
+                            
+                            <div className="grid grid-cols-3 md:grid-cols-6 gap-2 mt-1">
+                                <div className="bg-blue-50 rounded-lg py-2 px-1 border border-blue-100 text-center flex flex-col justify-center">
+                                    <p className="text-[10px] text-blue-600 font-bold uppercase tracking-tight mb-1">평균 스코어</p>
+                                    <p className="text-xl font-black text-blue-700">{stats.score}</p>
+                                </div>
+                                <div className="bg-teal-50 rounded-lg py-2 px-1 border border-teal-100 text-center flex flex-col justify-center">
+                                    <p className="text-[10px] text-teal-600 font-bold uppercase tracking-tight mb-1">평균 F/W</p>
+                                    <p className="text-xl font-black text-teal-700">{stats.fw}%</p>
+                                </div>
+                                <div className="bg-indigo-50 rounded-lg py-2 px-1 border border-indigo-100 text-center flex flex-col justify-center">
+                                    <p className="text-[10px] text-indigo-600 font-bold uppercase tracking-tight mb-1">평균 GIR</p>
+                                    <p className="text-xl font-black text-indigo-700">{stats.gir}%</p>
+                                </div>
+                                <div className="bg-orange-50 rounded-lg py-2 px-1 border border-orange-100 text-center flex flex-col justify-center">
+                                    <p className="text-[10px] text-orange-600 font-bold uppercase tracking-tight mb-1">평균 퍼트</p>
+                                    <p className="text-xl font-black text-orange-700">{stats.putts}</p>
+                                </div>
+                                <div className="bg-red-50 rounded-lg py-2 px-1 border border-red-100 text-center flex flex-col justify-center">
+                                    <p className="text-[10px] text-red-600 font-bold uppercase tracking-tight mb-1">평균 벌타</p>
+                                    <p className="text-xl font-black text-red-700">{stats.penalties}</p>
+                                </div>
+                                <div className="bg-yellow-50 rounded-lg py-2 px-1 border border-yellow-100 text-center flex flex-col justify-center">
+                                    <p className="text-[10px] text-yellow-600 font-bold uppercase tracking-tight mb-1">평균 벙커</p>
+                                    <p className="text-xl font-black text-yellow-700">{stats.bunkers}</p>
+                                </div>
+                            </div>
+                            
+                            {aiInsights && (
+                                <div className="mt-2 bg-gradient-to-br from-emerald-50/50 to-teal-50/50 rounded-xl border border-emerald-100/60 p-4">
+                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mb-3">
+                                        <div className="bg-white rounded-lg p-3 shadow-sm border border-red-100/60">
+                                            <ul className="space-y-2">
+                                                {aiInsights.worstHoles.map((h, i) => (
+                                                    <li key={i} className="text-[11px] flex justify-between items-start">
+                                                        <span className="font-bold text-gray-700 min-w-[70px] leading-tight">{h.key}</span>
+                                                        <div className="flex-1 text-right">
+                                                            <span className="text-red-500 font-bold block mb-0.5">+{h.overPar.toFixed(1)} 타</span>
+                                                            <span className="block text-[9px] text-gray-500 tracking-tight leading-none">{h.reason}</span>
+                                                        </div>
+                                                    </li>
+                                                ))}
+                                            </ul>
+                                        </div>
+                                        
+                                        <div className="bg-white rounded-lg p-3 shadow-sm border border-blue-100/60">
+                                            <ul className="space-y-2">
+                                                {aiInsights.bestHoles.map((h, i) => (
+                                                    <li key={i} className="text-[11px] flex justify-between items-start">
+                                                        <span className="font-bold text-gray-700 min-w-[70px] leading-tight">{h.key}</span>
+                                                        <div className="flex-1 text-right">
+                                                            <span className="text-blue-500 font-bold block mb-0.5">{h.overPar > 0 ? '+' : ''}{h.overPar.toFixed(1)} 타</span>
+                                                            <span className="block text-[9px] text-gray-500 tracking-tight leading-none">{h.reason}</span>
+                                                        </div>
+                                                    </li>
+                                                ))}
+                                            </ul>
+                                        </div>
+                                    </div>
+
+                                    {aiInsights.birdies.length > 0 && (
+                                        <div className="bg-yellow-50 rounded-lg p-3 shadow-sm border border-yellow-200/60 flex items-start gap-2.5 mb-2">
+                                            <div className="bg-yellow-200/50 p-1 rounded-md shrink-0">
+                                                <LucideIcon name="bird" className="w-4 h-4 text-yellow-700"/>
+                                            </div>
+                                            <div className="w-full">
+                                                <h5 className="text-[11px] font-bold text-yellow-800 mb-0.5">영광의 버디 기록 홀 🏆</h5>
+                                                <div className="space-y-0.5">
+                                                    {aiInsights.birdies.map((line, bIdx) => (
+                                                        <p key={bIdx} className="text-[11px] text-yellow-700/90 font-bold whitespace-nowrap overflow-hidden text-ellipsis">
+                                                            {line}
+                                                        </p>
+                                                    ))}
+                                                </div>
+                                            </div>
+                                        </div>
+                                    )}
+
+                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mt-3 border-t border-emerald-200/60 pt-3">
+                                        <div className="bg-white p-3 rounded-lg shadow-sm border border-indigo-100/60 flex flex-col items-center h-[240px]">
+                                            <h3 className="w-full text-[11px] font-bold text-gray-800 mb-1 flex items-center gap-1.5">
+                                                <LucideIcon name="hexagon" className="w-3.5 h-3.5 text-indigo-500" />
+                                                플레이 밸런스 분석
+                                            </h3>
+                                            <ResponsiveContainer width="100%" height="100%">
+                                                <RadarChart cx="50%" cy="50%" outerRadius="60%" data={aiInsights.report.radarData}>
+                                                    <PolarGrid stroke="#e2e8f0" />
+                                                    <PolarAngleAxis dataKey="subject" tick={{ fill: '#64748b', fontSize: 9, fontWeight: 'bold' }} />
+                                                    <PolarRadiusAxis angle={30} domain={[0, 100]} tick={false} axisLine={false} />
+                                                    <Radar name="능력치" dataKey="A" stroke="#10b981" fill="#34d399" fillOpacity={0.5} />
+                                                </RadarChart>
+                                            </ResponsiveContainer>
+                                        </div>
+                                        
+                                        <div className="flex flex-col gap-3 h-[240px] overflow-y-auto custom-scrollbar">
+                                            <div className="bg-white p-3 rounded-lg shadow-sm border border-emerald-100/60">
+                                                <h3 className="text-[11px] font-bold text-emerald-600 mb-2 flex items-center gap-1.5 border-b border-emerald-50 pb-1">
+                                                    <LucideIcon name="thumbs-up" className="w-3.5 h-3.5" /> 주요 성과 및 강점
+                                                </h3>
+                                                <div className="space-y-2">
+                                                    {aiInsights.report.strengths.slice(0, 3).map((item, idx) => (
+                                                        <div key={idx} className="flex gap-1.5 items-start">
+                                                            <LucideIcon name="check" className="w-3 h-3 text-emerald-500 shrink-0 mt-0.5" />
+                                                            <div>
+                                                                <h4 className="text-[10px] font-bold text-gray-800 leading-tight">{item.title}</h4>
+                                                                <p className="text-[9px] text-gray-500 mt-0.5 leading-snug">{item.desc}</p>
+                                                            </div>
+                                                        </div>
+                                                    ))}
+                                                </div>
+                                            </div>
+                                            
+                                            <div className="bg-white p-3 rounded-lg shadow-sm border border-red-100/60">
+                                                <h3 className="text-[11px] font-bold text-red-500 mb-2 flex items-center gap-1.5 border-b border-red-50 pb-1">
+                                                    <LucideIcon name="alert-triangle" className="w-3.5 h-3.5" /> 취약점 및 개선 분석
+                                                </h3>
+                                                <div className="space-y-2">
+                                                    {aiInsights.report.weaknesses.slice(0, 3).map((item, idx) => (
+                                                        <div key={idx} className="flex gap-1.5 items-start">
+                                                            <LucideIcon name="trending-down" className="w-3 h-3 text-red-500 shrink-0 mt-0.5" />
+                                                            <div>
+                                                                <h4 className="text-[10px] font-bold text-gray-800 leading-tight">{item.title}</h4>
+                                                                <p className="text-[9px] text-gray-500 mt-0.5 leading-snug">{item.desc}</p>
+                                                            </div>
+                                                        </div>
+                                                    ))}
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            )}
+                        </div>
+
+                        <div className="bg-white rounded-2xl shadow-sm border border-gray-100 flex flex-col overflow-hidden">
+                            <div className="bg-gradient-to-r from-emerald-500 to-teal-600 p-3 flex items-center gap-3">
+                                <div className="p-1.5 bg-white/20 rounded-lg text-white backdrop-blur-sm">
+                                    <LucideIcon name="bot" className="w-5 h-5" />
+                                </div>
+                                <h3 className="text-base font-bold text-white">AI 코스 공략 & 통계 Data</h3>
+                            </div>
+                            
+                            <div className="flex flex-col">
+                                {courseStats.map((cStat, i) => (
+                                    <div key={i} className={`${i > 0 ? 'border-t-4 border-gray-100' : ''}`}>
+                                        <div className="bg-gray-100 px-4 py-1.5 border-b border-gray-200 flex justify-between items-center">
+                                            <h4 className="font-bold text-gray-800 flex items-center gap-1.5 text-sm">
+                                                <LucideIcon name="flag-triangle-right" className="w-3.5 h-3.5 text-emerald-500" />
+                                                {cStat.name} 코스 분석
+                                            </h4>
+                                            <span className="text-[10px] font-medium text-gray-500 bg-white px-1.5 py-0.5 rounded border border-gray-200">
+                                                데이터 {cStat.count}회
+                                            </span>
+                                        </div>
+                                        <div className="overflow-x-auto">
+                                            <table className="w-full text-center text-xs table-fixed">
+                                                <thead>
+                                                    <tr className="bg-gray-50 text-gray-500 text-[11px]">
+                                                        <th className="py-1 px-1 md:px-1.5 border-r border-b w-[56px] md:w-[84px] text-center md:text-left md:pl-3 font-semibold text-[10px] md:text-[11px] tracking-tighter">구분</th>
+                                                        {[1,2,3,4,5,6,7,8,9].map(num => <th key={num} className="py-1 px-0.5 md:px-1.5 border-r border-b font-medium">{num}</th>)}
+                                                        <th className="py-1 px-1 md:px-1.5 border-b bg-indigo-50 text-indigo-700 font-bold w-[44px] md:w-16 whitespace-pre-wrap text-[10px] md:text-[11px] leading-tight">{cStat.name}</th>
+                                                    </tr>
+                                                </thead>
+                                                <tbody>
+                                                    <tr>
+                                                        <td className="py-1 px-1 md:px-1.5 border-r border-b text-center md:text-left md:pl-3 font-medium text-gray-600 bg-gray-50 text-[10px] md:text-xs tracking-tighter leading-tight">정규 타수</td>
+                                                        {cStat.holes.map((h, i) => <td key={i} className="py-1 px-0.5 md:px-1.5 border-r border-b text-gray-500 text-[10px] md:text-xs">{h.par}</td>)}
+                                                        <td className="py-1 px-1 md:px-1.5 border-b bg-indigo-50 font-bold text-indigo-600 text-[10px] md:text-xs">{cStat.avgPar}</td>
+                                                    </tr>
+                                                    <tr>
+                                                        <td className="py-1 px-1 md:px-1.5 border-r border-b text-center md:text-left md:pl-3 font-bold text-blue-600 bg-blue-50/30 text-[10px] md:text-xs tracking-tighter leading-tight">평균 타수</td>
+                                                        {cStat.holes.map((h, i) => <td key={i} className="py-1 px-0.5 md:px-1.5 border-r border-b font-bold text-blue-700 bg-blue-50/30 text-[10px] md:text-xs">{h.score}</td>)}
+                                                        <td className="py-1 px-1 md:px-1.5 border-b bg-indigo-100 font-black text-indigo-700 text-[10px] md:text-xs">{cStat.avgScore}</td>
+                                                    </tr>
+                                                    <tr>
+                                                        <td className="py-1 px-1 md:px-1.5 border-r border-b text-center md:text-left md:pl-3 font-medium text-gray-600 text-[10px] md:text-xs tracking-tighter leading-tight">평균 F/W</td>
+                                                        {cStat.holes.map((h, i) => <td key={i} className="py-1 px-0.5 md:px-1.5 border-r border-b text-teal-600 font-medium text-[10px] md:text-xs">{h.fw}%</td>)}
+                                                        <td className="py-1 px-1 md:px-1.5 border-b bg-indigo-50 font-bold text-indigo-600 text-[10px] md:text-xs">{cStat.avgFw}%</td>
+                                                    </tr>
+                                                    <tr>
+                                                        <td className="py-1 px-1 md:px-1.5 border-r border-b text-center md:text-left md:pl-3 font-medium text-gray-600 text-[10px] md:text-xs tracking-tighter leading-tight">평균 GIR</td>
+                                                        {cStat.holes.map((h, i) => <td key={i} className="py-1 px-0.5 md:px-1.5 border-r border-b text-emerald-600 font-medium text-[10px] md:text-xs">{h.gir}%</td>)}
+                                                        <td className="py-1 px-1 md:px-1.5 border-b bg-indigo-50 font-bold text-indigo-600 text-[10px] md:text-xs">{cStat.avgGir}%</td>
+                                                    </tr>
+                                                    <tr>
+                                                        <td className="py-1 px-1 md:px-1.5 border-r border-b text-center md:text-left md:pl-3 font-medium text-gray-600 text-[10px] md:text-xs tracking-tighter leading-tight">평균 퍼트</td>
+                                                        {cStat.holes.map((h, i) => <td key={i} className="py-1 px-0.5 md:px-1.5 border-r border-b text-orange-500 font-medium text-[10px] md:text-xs">{h.putts}</td>)}
+                                                        <td className="py-1 px-1 md:px-1.5 border-b bg-indigo-50 font-bold text-indigo-600 text-[10px] md:text-xs">{cStat.avgPutts}</td>
+                                                    </tr>
+                                                    <tr>
+                                                        <td className="py-1 px-1 md:px-1.5 border-r border-b text-center md:text-left md:pl-3 font-medium text-gray-600 text-[10px] md:text-xs tracking-tighter leading-tight">평균 벌타</td>
+                                                        {cStat.holes.map((h, i) => (
+                                                            <td key={i} className={`py-1 px-0.5 md:px-1.5 border-r border-b text-[10px] md:text-xs ${parseFloat(h.penalty) > 0 ? 'text-red-500 font-bold' : 'text-gray-300'}`}>
+                                                                {h.penalty}
+                                                            </td>
+                                                        ))}
+                                                        <td className={`py-1 px-1 md:px-1.5 border-b bg-indigo-50 font-bold text-[10px] md:text-xs ${parseFloat(cStat.avgPenalty) > 0 ? 'text-red-600' : 'text-indigo-400/50'}`}>{cStat.avgPenalty}</td>
+                                                    </tr>
+                                                    <tr>
+                                                        <td className="py-1 px-1 md:px-1.5 border-r text-center md:text-left md:pl-3 font-medium text-gray-600 text-[10px] md:text-xs tracking-tighter leading-tight">평균 벙커</td>
+                                                        {cStat.holes.map((h, i) => (
+                                                            <td key={i} className={`py-1 px-0.5 md:px-1.5 border-r text-[10px] md:text-xs ${parseFloat(h.bunker) > 0 ? 'text-yellow-600 font-bold' : 'text-gray-300'}`}>
+                                                                {h.bunker}
+                                                            </td>
+                                                        ))}
+                                                        <td className={`py-1 px-1 md:px-1.5 bg-indigo-50 font-bold text-[10px] md:text-xs ${parseFloat(cStat.avgBunker) > 0 ? 'text-yellow-700' : 'text-indigo-400/50'}`}>{cStat.avgBunker}</td>
+                                                    </tr>
+                                                </tbody>
+                                            </table>
+                                        </div>
+                                    </div>
+                                ))}
+                            </div>
+                        </div>
+                    </div>
+
+                    <div className="w-full xl:w-1/2 bg-white rounded-2xl shadow-sm border border-gray-100 flex flex-col h-[850px] overflow-hidden">
+                        <div className="p-5 border-b border-gray-100 bg-gray-50/50 flex justify-between items-center">
+                            <h3 className="font-bold text-gray-800">해당 구장 라운드 기록 상세</h3>
+                        </div>
+                        <div className="flex-1 overflow-y-auto custom-scrollbar">
+                            <table className="w-full text-sm text-left">
+                                <thead className="text-[11px] text-gray-400 uppercase bg-white sticky top-0 z-10 shadow-sm">
+                                    <tr>
+                                        <th className="px-2 sm:px-5 py-3 font-semibold whitespace-nowrap">날짜</th>
+                                        <th className="px-2 sm:px-5 py-3 text-center font-semibold whitespace-nowrap">스코어</th>
+                                        <th className="px-1 sm:px-4 py-3 text-center font-semibold whitespace-nowrap">F/W</th>
+                                        <th className="px-1 sm:px-4 py-3 text-center font-semibold whitespace-nowrap">GIR</th>
+                                        <th className="px-1 sm:px-4 py-3 text-center font-semibold whitespace-nowrap">퍼트</th>
+                                        <th className="px-1 sm:px-3 py-3 text-center font-semibold whitespace-nowrap">벌타</th>
+                                        <th className="px-1 sm:px-3 py-3 text-center font-semibold whitespace-nowrap">벙커</th>
+                                    </tr>
+                                </thead>
+                                <tbody className="divide-y divide-gray-50">
+                                    {courseData.map((row, idx) => (
+                                        <React.Fragment key={idx}>
+                                            <tr className="bg-white hover:bg-emerald-50/30 transition-colors cursor-pointer group">
+                                                <td className="px-2 sm:px-5 py-3 font-medium text-gray-600 flex items-center gap-1 sm:gap-2 text-xs whitespace-nowrap">
+                                                    <button onClick={() => toggleRound(idx)} className="p-1 rounded-md bg-gray-50 border border-gray-200 group-hover:bg-emerald-100 group-hover:border-emerald-200 group-hover:text-emerald-600 transition-colors shrink-0">
+                                                        {expandedRounds[idx] ? <MinusIcon /> : <PlusIcon />}
+                                                    </button>
+                                                    <span>{row.date.substring(2)}</span>
+                                                </td>
+                                                <td className="px-2 sm:px-5 py-3 text-center font-black text-blue-600 text-sm sm:text-base whitespace-nowrap">{row.score}</td>
+                                                <td className="px-1 sm:px-4 py-3 text-center text-[10px] sm:text-xs text-gray-500 whitespace-nowrap">{row.fwHit}%</td>
+                                                <td className="px-1 sm:px-4 py-3 text-center text-[10px] sm:text-xs text-gray-500 whitespace-nowrap">{row.gir}%</td>
+                                                <td className="px-1 sm:px-4 py-3 text-center text-[10px] sm:text-xs text-gray-600 font-medium whitespace-nowrap">{row.putts}</td>
+                                                <td className="px-1 sm:px-3 py-3 text-center text-[10px] sm:text-xs font-bold text-red-400 whitespace-nowrap">{row.penalties}</td>
+                                                <td className="px-1 sm:px-3 py-3 text-center text-[10px] sm:text-xs font-bold text-yellow-500 whitespace-nowrap">{row.bunkerShots}</td>
+                                            </tr>
+
+                                            {expandedRounds[idx] && (
+                                                <>
+                                                    <tr className="bg-slate-50 text-xs border-b border-gray-100">
+                                                        <td className="px-5 py-2 pl-12 flex items-center gap-2">
+                                                            <button onClick={() => toggleHalf(idx, 'front')} className="p-0.5 rounded bg-white border border-gray-300 text-gray-400">
+                                                                {expandedHalves[`${idx}-front`] ? <MinusIcon /> : <PlusIcon />}
+                                                            </button>
+                                                            <span className="text-gray-400 font-medium whitespace-nowrap">전반:</span>
+                                                            <span className="font-bold text-gray-700 truncate max-w-[80px]">{row.frontHalf?.course || row.frontNine}</span>
+                                                        </td>
+                                                        <td className="px-5 py-2 text-center font-bold text-blue-500">{row.frontHalf?.score}</td>
+                                                        <td className="px-4 py-2 text-center text-gray-400">{row.frontHalf?.fwHit}%</td>
+                                                        <td className="px-4 py-2 text-center text-gray-400">{row.frontHalf?.gir}%</td>
+                                                        <td className="px-4 py-2 text-center text-gray-500">{row.frontHalf?.putts}</td>
+                                                        <td className="px-3 py-2 text-center text-red-300">{row.frontHalf?.penalties}</td>
+                                                        <td className="px-3 py-2 text-center text-yellow-400">{row.frontHalf?.bunkerShots}</td>
+                                                    </tr>
+                                                    {expandedHalves[`${idx}-front`] && (
+                                                        <tr><td colSpan={7} className="p-4 bg-gray-100/50"><HoleTable holes={row.holes?.slice(0, 9) || []} /></td></tr>
+                                                    )}
+
+                                                    <tr className="bg-slate-50 text-xs border-b border-gray-100">
+                                                        <td className="px-5 py-2 pl-12 flex items-center gap-2">
+                                                            <button onClick={() => toggleHalf(idx, 'back')} className="p-0.5 rounded bg-white border border-gray-300 text-gray-400">
+                                                                {expandedHalves[`${idx}-back`] ? <MinusIcon /> : <PlusIcon />}
+                                                            </button>
+                                                            <span className="text-gray-400 font-medium whitespace-nowrap">후반:</span>
+                                                            <span className="font-bold text-gray-700 truncate max-w-[80px]">{row.backHalf?.course || row.backNine}</span>
+                                                        </td>
+                                                        <td className="px-5 py-2 text-center font-bold text-blue-500">{row.backHalf?.score}</td>
+                                                        <td className="px-4 py-2 text-center text-gray-400">{row.backHalf?.fwHit}%</td>
+                                                        <td className="px-4 py-2 text-center text-gray-400">{row.backHalf?.gir}%</td>
+                                                        <td className="px-4 py-2 text-center text-gray-500">{row.backHalf?.putts}</td>
+                                                        <td className="px-3 py-2 text-center text-red-300">{row.backHalf?.penalties}</td>
+                                                        <td className="px-3 py-2 text-center text-yellow-400">{row.backHalf?.bunkerShots}</td>
+                                                    </tr>
+                                                    {expandedHalves[`${idx}-back`] && (
+                                                        <tr><td colSpan={7} className="p-4 bg-gray-100/50"><HoleTable holes={row.holes?.slice(9, 18) || []} /></td></tr>
+                                                    )}
+                                                </>
+                                            )}
+                                        </React.Fragment>
+                                    ))}
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            );
+        };
+
+        const PartnerTab = ({ data }) => {
+            const partnersCount = useMemo(() => {
+                const map = {};
+                data.forEach(round => {
+                    if(round.partners && Array.isArray(round.partners)) {
+                        round.partners.forEach(p => {
+                            if(p.name) map[p.name] = (map[p.name] || 0) + 1;
+                        });
+                    }
+                });
+                return Object.entries(map).sort((a,b) => b[1] - a[1]).map(e => ({ name: e[0], count: e[1] }));
+            }, [data]);
+
+            const [selectedPartner, setSelectedPartner] = useState(partnersCount[0]?.name || "");
+
+            const h2hData = useMemo(() => {
+                if(!selectedPartner) return { matches: [], wins: 0, losses: 0, ties: 0, myAvg: 0, pAvg: 0 };
+                
+                const matches = [];
+                let wins = 0, losses = 0, ties = 0;
+                let myTotal = 0, pTotal = 0;
+
+                data.forEach(round => {
+                    const partner = round.partners?.find(p => p.name === selectedPartner);
+                    if(partner && partner.score > 0) {
+                        matches.push({
+                            date: round.date,
+                            course: round.courseName,
+                            myScore: round.score,
+                            partnerScore: partner.score
+                        });
+                        
+                        myTotal += round.score;
+                        pTotal += partner.score;
+
+                        if(round.score < partner.score) wins++;
+                        else if(round.score > partner.score) losses++;
+                        else ties++;
+                    }
+                });
+
+                matches.sort((a,b) => new Date(b.date) - new Date(a.date));
+
+                return { 
+                    matches, 
+                    wins, losses, ties, 
+                    myAvg: matches.length ? (myTotal/matches.length).toFixed(1) : 0, 
+                    pAvg: matches.length ? (pTotal/matches.length).toFixed(1) : 0 
+                };
+            }, [data, selectedPartner]);
+
+            const maxPerColumn = Math.ceil(h2hData.matches.length / 2);
+            const leftColumnMatches = h2hData.matches.slice(0, maxPerColumn);
+            const rightColumnMatches = h2hData.matches.slice(maxPerColumn);
+
+            return (
+                <div className="flex flex-col lg:flex-row gap-6 animate-fade-in w-full pb-10 h-auto lg:h-[850px]">
+                    <div className="w-full lg:w-[25%] shrink-0 flex flex-col gap-6">
+                        <div className="bg-white p-6 rounded-3xl shadow-sm border border-gray-100 flex flex-col items-center">
+                            <div className="w-12 h-12 bg-indigo-100 text-indigo-500 rounded-full flex items-center justify-center mb-4">
+                                <LucideIcon name="user-search" className="w-6 h-6" />
+                            </div>
+                            <label className="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">동반자 선택</label>
+                            <select 
+                                className="w-full border-b-2 border-indigo-500 pb-2 text-xl font-black text-gray-800 text-center focus:outline-none bg-transparent cursor-pointer hover:bg-gray-50 rounded-t-lg transition-colors"
+                                value={selectedPartner}
+                                onChange={(e) => setSelectedPartner(e.target.value)}
+                            >
+                                {partnersCount.map(p => <option key={p.name} value={p.name}>{p.name} ({p.count}회)</option>)}
+                            </select>
+                        </div>
+
+                        {h2hData.matches.length > 0 && (
+                            <div className="bg-gradient-to-br from-indigo-500 via-purple-500 to-fuchsia-600 rounded-3xl p-6 text-white flex flex-col justify-center items-center text-center shadow-md h-[280px] relative overflow-hidden">
+                                <div className="absolute top-[-20px] right-[-20px] opacity-10">
+                                    <LucideIcon name="swords" className="w-32 h-32" />
+                                </div>
+                                <h3 className="text-indigo-100 font-medium mb-4 text-sm tracking-wide z-10">역대 전적</h3>
+                                <div className="text-4xl font-black mb-8 tracking-wider drop-shadow-md z-10">
+                                    {h2hData.wins}승 <span className="text-2xl text-indigo-200 mx-1">{h2hData.ties}무</span> {h2hData.losses}패
+                                </div>
+                                <div className="flex w-full justify-between items-center bg-white/10 backdrop-blur-md rounded-2xl p-4 border border-white/20 z-10">
+                                    <div className="flex flex-col items-center flex-1">
+                                        <p className="text-[10px] text-indigo-200 uppercase tracking-widest mb-1">나의 평균</p>
+                                        <p className="text-2xl font-bold">{h2hData.myAvg}</p>
+                                    </div>
+                                    <div className="w-px h-10 bg-indigo-300/30 mx-2"></div>
+                                    <div className="flex flex-col items-center flex-1">
+                                        <p className="text-[10px] text-indigo-200 uppercase tracking-widest mb-1">{selectedPartner}</p>
+                                        <p className="text-2xl font-bold text-fuchsia-200">{h2hData.pAvg}</p>
+                                    </div>
+                                </div>
+                            </div>
+                        )}
+                    </div>
+
+                    <div className="w-full lg:w-[75%] shrink-0 lg:h-full">
+                        {h2hData.matches.length > 0 ? (
+                            <div className="bg-white rounded-3xl shadow-sm border border-gray-100 overflow-hidden flex flex-col h-full min-h-[500px]">
+                                <div className="p-5 border-b border-gray-100 flex items-center gap-3 bg-gray-50/50">
+                                    <LucideIcon name="history" className="w-5 h-5 text-indigo-500" />
+                                    <h3 className="font-bold text-gray-800">Round History</h3>
+                                </div>
+                                <div className="flex-1 overflow-y-auto custom-scrollbar p-2">
+                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                        <div>
+                                            <table className="w-full text-[11px] text-left table-fixed">
+                                                <thead className="text-[10px] text-gray-400 uppercase bg-gray-50/80 sticky top-0">
+                                                    <tr>
+                                                        <th className="px-2 py-2 w-[22%] font-semibold">날짜</th>
+                                                        <th className="px-2 py-2 w-[36%] font-semibold">구장</th>
+                                                        <th className="px-2 py-2 w-[11%] text-center font-semibold">나</th>
+                                                        <th className="px-2 py-2 w-[20%] text-center font-semibold">결과</th>
+                                                        <th className="px-2 py-2 w-[11%] text-center font-semibold">상대</th>
+                                                    </tr>
+                                                </thead>
+                                                <tbody className="divide-y divide-gray-50">
+                                                    {leftColumnMatches.map((m, idx) => {
+                                                        const isWin = m.myScore < m.partnerScore;
+                                                        const isLoss = m.myScore > m.partnerScore;
+                                                        return (
+                                                            <tr key={`l-${idx}`} className="hover:bg-indigo-50/30 transition-colors">
+                                                                <td className="w-[22%] px-2 py-2 text-gray-400 tracking-tighter whitespace-nowrap">{m.date.substring(2)}</td>
+                                                                <td className="w-[36%] px-2 py-2 font-bold text-gray-700 truncate">{m.course}</td>
+                                                                <td className={`w-[11%] px-2 py-2 text-center font-black ${isWin ? 'text-blue-600' : 'text-gray-500'}`}>{m.myScore}</td>
+                                                                <td className="w-[20%] px-2 py-2 text-center">
+                                                                    {isWin && <span className="inline-block px-1.5 py-0.5 bg-blue-50 text-blue-600 border border-blue-100 rounded text-[9px] font-black tracking-wider">WIN</span>}
+                                                                    {isLoss && <span className="inline-block px-1.5 py-0.5 bg-red-50 text-red-500 border border-red-100 rounded text-[9px] font-black tracking-wider">LOSS</span>}
+                                                                    {!isWin && !isLoss && <span className="inline-block px-1.5 py-0.5 bg-gray-100 text-gray-500 border border-gray-200 rounded text-[9px] font-black tracking-wider">TIE</span>}
+                                                                </td>
+                                                                <td className={`w-[11%] px-2 py-2 text-center font-bold ${isLoss ? 'text-red-500' : 'text-gray-400'}`}>{m.partnerScore}</td>
+                                                            </tr>
+                                                        )
+                                                    })}
+                                                </tbody>
+                                            </table>
+                                        </div>
+
+                                        {rightColumnMatches.length > 0 && (
+                                            <div>
+                                                <table className="w-full text-[11px] text-left table-fixed">
+                                                    <thead className="text-[10px] text-gray-400 uppercase bg-gray-50/80 sticky top-0 hidden md:table-header-group">
+                                                        <tr>
+                                                            <th className="px-2 py-2 w-[22%] font-semibold">날짜</th>
+                                                            <th className="px-2 py-2 w-[36%] font-semibold">구장</th>
+                                                            <th className="px-2 py-2 w-[11%] text-center font-semibold">나</th>
+                                                            <th className="px-2 py-2 w-[20%] text-center font-semibold">결과</th>
+                                                            <th className="px-2 py-2 w-[11%] text-center font-semibold">상대</th>
+                                                        </tr>
+                                                    </thead>
+                                                    <tbody className="divide-y divide-gray-50">
+                                                        {rightColumnMatches.map((m, idx) => {
+                                                            const isWin = m.myScore < m.partnerScore;
+                                                            const isLoss = m.myScore > m.partnerScore;
+                                                            return (
+                                                                <tr key={`r-${idx}`} className="hover:bg-indigo-50/30 transition-colors">
+                                                                    <td className="w-[22%] px-2 py-2 text-gray-400 tracking-tighter whitespace-nowrap">{m.date.substring(2)}</td>
+                                                                    <td className="w-[36%] px-2 py-2 font-bold text-gray-700 truncate">{m.course}</td>
+                                                                    <td className={`w-[11%] px-2 py-2 text-center font-black ${isWin ? 'text-blue-600' : 'text-gray-500'}`}>{m.myScore}</td>
+                                                                    <td className="w-[20%] px-2 py-2 text-center">
+                                                                        {isWin && <span className="inline-block px-1.5 py-0.5 bg-blue-50 text-blue-600 border border-blue-100 rounded text-[9px] font-black tracking-wider">WIN</span>}
+                                                                        {isLoss && <span className="inline-block px-1.5 py-0.5 bg-red-50 text-red-500 border border-red-100 rounded text-[9px] font-black tracking-wider">LOSS</span>}
+                                                                        {!isWin && !isLoss && <span className="inline-block px-1.5 py-0.5 bg-gray-100 text-gray-500 border border-gray-200 rounded text-[9px] font-black tracking-wider">TIE</span>}
+                                                                    </td>
+                                                                    <td className={`w-[11%] px-2 py-2 text-center font-bold ${isLoss ? 'text-red-500' : 'text-gray-400'}`}>{m.partnerScore}</td>
+                                                                </tr>
+                                                            )
+                                                        })}
+                                                    </tbody>
+                                                </table>
+                                            </div>
+                                        )}
+                                    </div>
+                                </div>
+                            </div>
+                        ) : (
+                            <div className="flex flex-col items-center justify-center h-full text-gray-400 bg-white rounded-3xl border border-gray-100 shadow-sm min-h-[500px]">
+                                <LucideIcon name="ghost" className="w-12 h-12 mb-3 text-gray-300" />
+                                <p>동반자 데이터가 없습니다.</p>
+                            </div>
+                        )}
+                    </div>
+                </div>
+            );
+        };
+
+        const HoleTable = ({ holes }) => {
+            return (
+                <div className="overflow-x-auto rounded-xl border border-gray-200 bg-white shadow-sm">
+                    <table className="w-full text-center border-collapse">
+                        <thead>
+                            <tr className="bg-slate-100 text-slate-600 font-medium text-[11px] uppercase tracking-wider">
+                                <th className="p-1 sm:p-2 border-r border-b text-left pl-2 sm:pl-3 w-10 sm:w-14 whitespace-nowrap">Hole</th>
+                                {holes.map((h, i) => <th key={`h-${i}`} className="p-1 sm:p-2 border-r border-b w-6 sm:w-8 whitespace-nowrap">{h.holeNo}</th>)}
+                            </tr>
+                        </thead>
+                        <tbody className="text-[10px] sm:text-[11px]">
+                            <tr>
+                                <td className="p-1 sm:p-1.5 border-r border-b font-medium text-slate-500 text-left pl-2 sm:pl-3 bg-slate-50 whitespace-nowrap">Par</td>
+                                {holes.map((h, i) => <td key={`p-${i}`} className="p-1 sm:p-1.5 border-r border-b bg-slate-50 whitespace-nowrap">{h.par}</td>)}
+                            </tr>
+                            <tr>
+                                <td className="p-1 sm:p-1.5 border-r border-b font-semibold text-blue-600 text-left pl-2 sm:pl-3 bg-blue-50/30 whitespace-nowrap">Score</td>
+                                {holes.map((h, i) => {
+                                    const isBirdie = h.score < h.par && h.score > 0;
+                                    const isBogey = h.score > h.par;
+                                    return (
+                                        <td key={`s-${i}`} className={`p-1 sm:p-1.5 border-r border-b font-bold bg-blue-50/30 whitespace-nowrap ${isBirdie ? 'text-red-500' : isBogey ? 'text-blue-600' : 'text-gray-700'}`}>
+                                            {h.score}
+                                        </td>
+                                    )
+                                })}
+                            </tr>
+                            <tr>
+                                <td className="p-1 sm:p-1.5 border-r border-b text-slate-500 text-left pl-2 sm:pl-3 whitespace-nowrap">Putts</td>
+                                {holes.map((h, i) => <td key={`pu-${i}`} className="p-1 sm:p-1.5 border-r border-b text-gray-600 font-medium whitespace-nowrap">{h.putts || '-'}</td>)}
+                            </tr>
+                            <tr>
+                                <td className="p-1 sm:p-1.5 border-r border-b text-slate-500 text-left pl-2 sm:pl-3 whitespace-nowrap">F/W</td>
+                                {holes.map((h, i) => (
+                                    <td key={`fw-${i}`} className={`p-1 sm:p-1.5 border-r border-b font-bold whitespace-nowrap ${h.fw==='Y'?'text-emerald-500':h.fw==='N'?'text-gray-300':''}`}>
+                                        {h.fw}
+                                    </td>
+                                ))}
+                            </tr>
+                            <tr>
+                                <td className="p-1 sm:p-1.5 border-r border-b text-slate-500 text-left pl-2 sm:pl-3 whitespace-nowrap">GIR</td>
+                                {holes.map((h, i) => (
+                                    <td key={`g-${i}`} className={`p-1 sm:p-1.5 border-r border-b font-bold whitespace-nowrap ${h.gir==='Y'?'text-indigo-500':h.gir==='N'?'text-gray-300':''}`}>
+                                        {h.gir}
+                                    </td>
+                                ))}
+                            </tr>
+                            <tr>
+                                <td className="p-1 sm:p-1.5 border-r border-b text-slate-500 text-left pl-2 sm:pl-3 whitespace-nowrap">Penalty</td>
+                                {holes.map((h, i) => (
+                                    <td key={`pe-${i}`} className={`p-1 sm:p-1.5 border-r border-b whitespace-nowrap ${h.penalty > 0 ? 'text-red-500 font-bold' : 'text-gray-200'}`}>
+                                        {h.penalty > 0 ? h.penalty : '-'}
+                                    </td>
+                                ))}
+                            </tr>
+                            <tr>
+                                <td className="p-1 sm:p-1.5 border-r text-slate-500 text-left pl-2 sm:pl-3 whitespace-nowrap">Bunker</td>
+                                {holes.map((h, i) => (
+                                    <td key={`b-${i}`} className={`p-1 sm:p-1.5 border-r whitespace-nowrap ${h.bunker > 0 ? 'text-yellow-600 font-bold' : 'text-gray-200'}`}>
+                                        {h.bunker > 0 ? h.bunker : '-'}
+                                    </td>
+                                ))}
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            );
+        };
+
+        const StatCard = ({ title, value, suffix, color }) => {
+            const colorMap = {
+                blue: 'text-blue-600 bg-blue-50 border-blue-100',
+                emerald: 'text-emerald-600 bg-emerald-50 border-emerald-100',
+                indigo: 'text-indigo-600 bg-indigo-50 border-indigo-100',
+                orange: 'text-orange-600 bg-orange-50 border-orange-100',
+                purple: 'text-purple-600 bg-purple-50 border-purple-100'
+            };
+            const selectedStyle = colorMap[color] || colorMap.blue;
+            return (
+                <div className={`py-3 px-4 rounded-xl shadow-sm border ${selectedStyle} flex flex-col items-center justify-center text-center h-[70px]`}>
+                    <p className="text-[10px] font-bold uppercase tracking-wider mb-0.5 opacity-70">{title}</p>
+                    <p className="text-xl font-black leading-none">
+                        {value} <span className="text-[10px] font-medium opacity-60 ml-0.5">{suffix}</span>
+                    </p>
+                </div>
+            );
+        };
+
+        const ReportTab = ({ data }) => {
+            const years = useMemo(() => {
+                return [...new Set(data.map(d => d.year))].filter(y => y && !isNaN(y) && parseInt(y) > 2000).sort((a,b)=> b-a);
+            }, [data]);
+
+            const [selectedYear, setSelectedYear] = useState(years.length > 0 ? years[0] : 'all');
+
+            const reportData = useMemo(() => {
+                const filtered = selectedYear === 'all' ? data : data.filter(d => d.year === selectedYear);
+                if (filtered.length === 0) return null;
+
+                let totals = { score: 0, putts: 0, fwHit: 0, fwCount: 0, gir: 0, girCount: 0, penalties: 0, bunkers: 0, ud: 0, udCount: 0, par3Score: 0, par3Par: 0, par4Score: 0, par4Par: 0, par5Score: 0, par5Par: 0 };
+                let bestScore = 999;
+                let worstScore = 0;
+                let subPars = 0, pars = 0, bogeys = 0, doublePlus = 0;
+
+                filtered.forEach(d => {
+                    totals.score += d.score;
+                    if (d.score < bestScore) bestScore = d.score;
+                    if (d.score > worstScore) worstScore = d.score;
+                    
+                    if (d.putts > 0) totals.putts += d.putts;
+                    if (d.fwHit > 0) { totals.fwHit += d.fwHit; totals.fwCount++; }
+                    if (d.gir > 0) { totals.gir += d.gir; totals.girCount++; }
+                    if (d.ud > 0) { totals.ud += d.ud; totals.udCount++; }
+                    totals.penalties += d.penalties;
+                    totals.bunkers += d.bunkerShots;
+
+                    d.holes.forEach(h => {
+                        if (h.par === 0) return;
+                        if (h.par === 3) { totals.par3Score += h.score; totals.par3Par += h.par; }
+                        else if (h.par === 4) { totals.par4Score += h.score; totals.par4Par += h.par; }
+                        else if (h.par === 5) { totals.par5Score += h.score; totals.par5Par += h.par; }
+
+                        const diff = h.score - h.par;
+                        if (diff < 0) subPars++;
+                        else if (diff === 0) pars++;
+                        else if (diff === 1) bogeys++;
+                        else if (diff >= 2) doublePlus++;
+                    });
+                });
+
+                const count = filtered.length;
+                const totalHoles = subPars + pars + bogeys + doublePlus || 1;
+
+                const stats = {
+                    rounds: count,
+                    avgScore: (totals.score / count).toFixed(1),
+                    bestScore: bestScore === 999 ? '-' : bestScore,
+                    worstScore: worstScore === 0 ? '-' : worstScore,
+                    avgPutts: (totals.putts / count).toFixed(1),
+                    fwRate: totals.fwCount ? Math.round(totals.fwHit / totals.fwCount) : 0,
+                    girRate: totals.girCount ? Math.round(totals.gir / totals.girCount) : 0,
+                    udRate: totals.udCount ? Math.round(totals.ud / totals.udCount) : 0,
+                    avgPenalty: (totals.penalties / count).toFixed(1),
+                    avgBunker: (totals.bunkers / count).toFixed(1),
+                    par3Avg: totals.par3Par ? '+' + ((totals.par3Score - totals.par3Par) / (totals.par3Par/3)).toFixed(1) : '-',
+                    par4Avg: totals.par4Par ? '+' + ((totals.par4Score - totals.par4Par) / (totals.par4Par/4)).toFixed(1) : '-',
+                    par5Avg: totals.par5Par ? '+' + ((totals.par5Score - totals.par5Par) / (totals.par5Par/5)).toFixed(1) : '-',
+                    parRate: Math.round(((subPars + pars) / totalHoles) * 100),
+                    bogeyRate: Math.round((bogeys / totalHoles) * 100),
+                    doubleRate: Math.round((doublePlus / totalHoles) * 100)
+                };
+
+                let strengths = [];
+                let weaknesses = [];
+                let strategies = [];
+
+                if (stats.fwRate >= 55) strengths.push({ title: "안정적인 티샷", desc: `페어웨이 안착률이 ${stats.fwRate}%로 평균 이상입니다. 세컨드 샷을 유리한 위치에서 시작하여 스코어 방어에 큰 기여를 하고 있습니다.` });
+                if (stats.girRate >= 40) strengths.push({ title: "날카로운 아이언", desc: `그린 적중률(GIR) ${stats.girRate}%로 훌륭한 샷 밸런스를 유지하고 있습니다. 버디와 파 찬스를 꾸준히 만들어냅니다.` });
+                if (parseFloat(stats.avgPutts) <= 35) strengths.push({ title: "정교한 퍼팅", desc: `평균 퍼트 수가 ${stats.avgPutts}개로 그린 위에서의 집중력이 뛰어납니다. 쓰리 퍼트를 효과적으로 억제하고 있습니다.` });
+                if (parseFloat(stats.avgPenalty) <= 1.0) strengths.push({ title: "스마트한 코스 매니지먼트", desc: `라운드 당 평균 벌타가 ${stats.avgPenalty}개 수준으로, 리스크를 잘 관리하는 영리한 플레이를 보여줍니다.` });
+                if (stats.udRate >= 25) strengths.push({ title: "뛰어난 위기 관리 (U/D)", desc: `그린을 놓쳤을 때 파로 막아내는 U/D 성공률이 ${stats.udRate}%로 매우 우수합니다. 어프로치와 숏게임이 강력한 무기입니다.` });
+
+                if (stats.fwRate < 50 && totals.fwCount > 0) weaknesses.push({ title: "티샷 방향성 기복", desc: `페어웨이 안착률(${stats.fwRate}%)이 다소 아쉽습니다. 트러블 상황에서의 세컨드 샷 비중이 높아 스코어 손실이 누적됩니다.` });
+                if (stats.girRate < 35 && totals.girCount > 0) weaknesses.push({ title: "아이언 정확도 및 세컨드 샷 불안", desc: `그린 적중률(${stats.girRate}%)이 낮아 숏게임(어프로치)에 대한 의존도와 압박감이 매우 높습니다.` });
+                if (parseFloat(stats.avgPutts) >= 36) weaknesses.push({ title: "퍼팅 거리감 및 숏퍼트 미스", desc: `평균 퍼트 수(${stats.avgPutts}개)가 많습니다. 첫 퍼트의 거리감 부족이 쓰리 퍼트로 이어지거나 1~2m 숏퍼트 미스가 잦은 것으로 보입니다.` });
+                if (parseFloat(stats.avgPenalty) >= 1.5) weaknesses.push({ title: "코스 매니지먼 및 페널티 누적", desc: `평균 벌타가 ${stats.avgPenalty}개로 스코어 상승의 주된 원인입니다. 공격적인 에이밍이나 무리한 세컨드 샷 시도가 원인일 수 있습니다.` });
+                if (stats.udRate < 20 && totals.udCount > 0) weaknesses.push({ title: "그린 주변 숏게임(U/D) 불안", desc: `U/D 성공률(${stats.udRate}%)이 낮습니다. 그린 주변에서 파 세이브를 하지 못해 보기가 더블 보기로 무너지는 흐름이 나옵니다.` });
+                if (parseFloat(stats.avgBunker) >= 3.0) weaknesses.push({ title: "벙커 기피 현상 및 탈출 실패", desc: `평균 벙커샷이 ${stats.avgBunker}회로 잦습니다. 벙커에 자주 빠지거나 한 번에 탈출하지 못해 타수를 잃고 있습니다.` });
+
+                if (strengths.length === 0) strengths.push({ title: "무난한 플레이 흐름", desc: "전체적으로 크게 흔들림 없이 안정적인 템포를 유지하며 라운딩을 소화하고 있습니다." });
+                if (weaknesses.length === 0) weaknesses.push({ title: "숏게임 집중력 저하", desc: "전반적인 샷 지표는 준수하나, 스코어를 극적으로 줄이기 위해서는 30m 이내 어프로치와 퍼팅 퀄리티를 한 단계 높여야 합니다." });
+
+                if (stats.girRate < 35) strategies.push("100~130m 이내의 숏아이언/웨지 컨트롤 샷 연습량을 늘려 그린 적중률(GIR)을 방어하세요.");
+                if (parseFloat(stats.avgPutts) >= 36) strategies.push("라운드 전 연습그린에서 반드시 10~15보 롱퍼트 거리감 맞추기와 1.5m 숏퍼트 집중력 연습에 15분 이상 투자하세요.");
+                if (stats.udRate < 20 && totals.udCount > 0) strategies.push("그린 주변 10~20m 어프로치 시, 공을 무리하게 띄우기보다는 런닝 어프로치(피치앤런) 비율을 높여 홀에 붙일 확률을 높이세요.");
+                if (stats.fwRate < 50) strategies.push("드라이버 비거리에 대한 욕심을 버리고, 80%의 스윙 크기로 페어웨이를 지키는 '컨트롤 티샷' 전략을 실전에서 테스트해 보세요.");
+                if (parseFloat(stats.avgPenalty) >= 1.5) strategies.push("위험 구역(OB/해저드)이 있는 홀에서는 무조건 넓은 쪽이나 안전한 벙커 방향을 에이밍하는 보수적인 코스 매니지먼트를 적용하세요.");
+                if (parseFloat(stats.avgBunker) >= 3.0) strategies.push("세컨드 샷 에이밍 시 핀을 직접 노리기보다 벙커를 피하는 안전한 구역(그린 중앙)을 최우선 타겟으로 삼으세요.");
+                if (strategies.length < 3) strategies.push("파3 홀에서의 티샷 정확도를 높이고, 파4 홀에서는 무리한 2온보다는 안전한 3온 1퍼트 전략을 적절히 섞어 운영해 보세요.");
+                
+                const radarData = [
+                    { subject: '정확도(FW)', A: stats.fwRate || 0, fullMark: 100 },
+                    { subject: '아이언(GIR)', A: stats.girRate || 0, fullMark: 100 },
+                    { subject: '스코어', A: Math.max(0, 100 - (parseFloat(stats.avgScore) - 72) * 2), fullMark: 100 }, 
+                    { subject: '안정성(Penalty)', A: Math.max(0, 100 - (parseFloat(stats.avgPenalty) * 15)), fullMark: 100 },
+                    { subject: '퍼팅', A: Math.max(0, 100 - (parseFloat(stats.avgPutts) - 28) * 3), fullMark: 100 }, 
+                    { subject: '위기관리(U/D)', A: stats.udRate || 0, fullMark: 100 }
+                ];
+
+                return { stats, strengths, weaknesses, strategies, radarData };
+            }, [data, selectedYear]);
+
+            if (!reportData) return <div className="text-center p-10 text-gray-500">해당 연도의 데이터가 없습니다.</div>;
+
+            return (
+                <div className="space-y-6 animate-fade-in pb-10 max-w-6xl mx-auto">
+                    <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 bg-white p-5 rounded-2xl shadow-sm border border-gray-100">
+                        <div>
+                            <h2 className="text-xl font-black text-gray-800 flex items-center gap-2">
+                                <LucideIcon name="clipboard-check" className="w-6 h-6 text-emerald-500" />
+                                {selectedYear === 'all' ? '전체 기간' : `${selectedYear}년`} 골프 종합 분석 보고서
+                            </h2>
+                            <p className="text-xs text-gray-500 mt-1">AI가 고객님의 데이터를 다각도로 분석하여 작성한 리포트입니다.</p>
+                        </div>
+                        <select 
+                            className="border border-gray-200 rounded-xl px-4 py-2 font-bold text-sm text-gray-800 focus:ring-emerald-500 focus:border-emerald-500 bg-gray-50 hover:bg-white transition-colors cursor-pointer"
+                            value={selectedYear}
+                            onChange={(e) => setSelectedYear(e.target.value)}
+                        >
+                            <option value="all">전체 연도</option>
+                            {years.map(y => <option key={y} value={y}>{y}년</option>)}
+                        </select>
+                    </div>
+
+                    <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                        <div className="bg-gradient-to-br from-slate-800 to-slate-900 rounded-2xl p-5 text-white shadow-md relative overflow-hidden">
+                            <div className="absolute right-[-10px] top-[-10px] opacity-10">
+                                <LucideIcon name="flag" className="w-24 h-24" />
+                            </div>
+                            <p className="text-slate-400 text-xs font-bold uppercase tracking-wider mb-1 relative z-10">총 라운드</p>
+                            <p className="text-3xl font-black relative z-10">{reportData.stats.rounds}<span className="text-sm font-normal text-slate-300 ml-1">회</span></p>
+                        </div>
+                        <div className="bg-gradient-to-br from-blue-500 to-blue-700 rounded-2xl p-5 text-white shadow-md relative overflow-hidden">
+                            <div className="absolute right-[-10px] top-[-10px] opacity-10">
+                                <LucideIcon name="target" className="w-24 h-24" />
+                            </div>
+                            <p className="text-blue-200 text-xs font-bold uppercase tracking-wider mb-1 relative z-10">평균 스코어</p>
+                            <p className="text-3xl font-black relative z-10">{reportData.stats.avgScore}<span className="text-sm font-normal text-blue-200 ml-1">타</span></p>
+                        </div>
+                        <div className="bg-gradient-to-br from-emerald-500 to-teal-600 rounded-2xl p-5 text-white shadow-md relative overflow-hidden">
+                            <div className="absolute right-[-10px] top-[-10px] opacity-10">
+                                <LucideIcon name="award" className="w-24 h-24" />
+                            </div>
+                            <p className="text-emerald-200 text-xs font-bold uppercase tracking-wider mb-1 relative z-10">시즌 베스트</p>
+                            <p className="text-3xl font-black relative z-10">{reportData.stats.bestScore}<span className="text-sm font-normal text-emerald-200 ml-1">타</span></p>
+                        </div>
+                        <div className="bg-gradient-to-br from-orange-400 to-red-500 rounded-2xl p-5 text-white shadow-md relative overflow-hidden">
+                            <div className="absolute right-[-10px] top-[-10px] opacity-10">
+                                <LucideIcon name="trending-down" className="w-24 h-24" />
+                            </div>
+                            <p className="text-orange-200 text-xs font-bold uppercase tracking-wider mb-1 relative z-10">평균 퍼트수</p>
+                            <p className="text-3xl font-black relative z-10">{reportData.stats.avgPutts}<span className="text-sm font-normal text-orange-200 ml-1">개</span></p>
+                        </div>
+                    </div>
+
+                    <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                        <div className="lg:col-span-1 space-y-6">
+                            <div className="bg-white p-5 rounded-2xl shadow-sm border border-gray-100 flex flex-col items-center h-[320px]">
+                                <h3 className="w-full text-sm font-bold text-gray-800 mb-2 flex items-center gap-2">
+                                    <LucideIcon name="hexagon" className="w-4 h-4 text-indigo-500" />
+                                    플레이 밸런스 분석
+                                </h3>
+                                <ResponsiveContainer width="100%" height="100%">
+                                    <RadarChart cx="50%" cy="50%" outerRadius="70%" data={reportData.radarData}>
+                                        <PolarGrid stroke="#e2e8f0" />
+                                        <PolarAngleAxis dataKey="subject" tick={{ fill: '#64748b', fontSize: 11, fontWeight: 'bold' }} />
+                                        <PolarRadiusAxis angle={30} domain={[0, 100]} tick={false} axisLine={false} />
+                                        <Radar name="능력치" dataKey="A" stroke="#10b981" fill="#34d399" fillOpacity={0.5} />
+                                    </RadarChart>
+                                </ResponsiveContainer>
+                            </div>
+
+                            <div className="bg-white p-5 rounded-2xl shadow-sm border border-gray-100">
+                                <h3 className="text-sm font-bold text-gray-800 mb-4 flex items-center gap-2">
+                                    <LucideIcon name="pie-chart" className="w-4 h-4 text-blue-500" />
+                                    홀별 스코어 분포도
+                                </h3>
+                                <div className="space-y-3">
+                                    <div>
+                                        <div className="flex justify-between text-[11px] font-bold mb-1">
+                                            <span className="text-emerald-600">파 이하 (Par or Better)</span>
+                                            <span className="text-emerald-700">{reportData.stats.parRate}%</span>
+                                        </div>
+                                        <div className="w-full bg-gray-100 rounded-full h-2">
+                                            <div className="bg-emerald-500 h-2 rounded-full" style={{ width: `${reportData.stats.parRate}%` }}></div>
+                                        </div>
+                                    </div>
+                                    <div>
+                                        <div className="flex justify-between text-[11px] font-bold mb-1">
+                                            <span className="text-blue-600">보기 (Bogey)</span>
+                                            <span className="text-blue-700">{reportData.stats.bogeyRate}%</span>
+                                        </div>
+                                        <div className="w-full bg-gray-100 rounded-full h-2">
+                                            <div className="bg-blue-500 h-2 rounded-full" style={{ width: `${reportData.stats.bogeyRate}%` }}></div>
+                                        </div>
+                                    </div>
+                                    <div>
+                                        <div className="flex justify-between text-[11px] font-bold mb-1">
+                                            <span className="text-red-500">더블 보기 이상 (Double+)</span>
+                                            <span className="text-red-600">{reportData.stats.doubleRate}%</span>
+                                        </div>
+                                        <div className="w-full bg-gray-100 rounded-full h-2">
+                                            <div className="bg-red-500 h-2 rounded-full" style={{ width: `${reportData.stats.doubleRate}%` }}></div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div className="lg:col-span-2 space-y-6">
+                            
+                            <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100">
+                                <h3 className="text-base font-black text-emerald-600 mb-4 flex items-center gap-2 border-b border-emerald-100 pb-3">
+                                    <LucideIcon name="thumbs-up" className="w-5 h-5" />
+                                    주요 성과 및 강점
+                                </h3>
+                                <div className="space-y-4">
+                                    {reportData.strengths.map((item, idx) => (
+                                        <div key={idx} className="flex gap-3 items-start">
+                                            <div className="mt-0.5 bg-emerald-100 p-1.5 rounded-lg shrink-0">
+                                                <LucideIcon name="check" className="w-4 h-4 text-emerald-600" />
+                                            </div>
+                                            <div>
+                                                <h4 className="text-sm font-bold text-gray-800">{item.title}</h4>
+                                                <p className="text-[13px] text-gray-600 mt-1 leading-relaxed">{item.desc}</p>
+                                            </div>
+                                        </div>
+                                    ))}
+                                </div>
+                            </div>
+
+                            <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100">
+                                <h3 className="text-base font-black text-red-500 mb-4 flex items-center gap-2 border-b border-red-100 pb-3">
+                                    <LucideIcon name="alert-triangle" className="w-5 h-5" />
+                                    취약점 및 개선 분석
+                                </h3>
+                                <div className="space-y-4">
+                                    {reportData.weaknesses.map((item, idx) => (
+                                        <div key={idx} className="flex gap-3 items-start">
+                                            <div className="mt-0.5 bg-red-100 p-1.5 rounded-lg shrink-0">
+                                                <LucideIcon name="trending-down" className="w-4 h-4 text-red-600" />
+                                            </div>
+                                            <div>
+                                                <h4 className="text-sm font-bold text-gray-800">{item.title}</h4>
+                                                <p className="text-[13px] text-gray-600 mt-1 leading-relaxed">{item.desc}</p>
+                                            </div>
+                                        </div>
+                                    ))}
+                                </div>
+                            </div>
+
+                            <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100">
+                                <h3 className="text-base font-black text-indigo-600 mb-4 flex items-center gap-2 border-b border-indigo-100 pb-3">
+                                    <LucideIcon name="lightbulb" className="w-5 h-5" />
+                                    핵심 훈련 전략 및 조언
+                                </h3>
+                                <ul className="space-y-3">
+                                    {reportData.strategies.map((strategy, idx) => (
+                                        <li key={idx} className="flex gap-3 items-start bg-indigo-50/50 p-3 rounded-xl border border-indigo-50">
+                                            <span className="text-indigo-500 font-black text-sm">{idx + 1}.</span>
+                                            <p className="text-[13px] text-gray-700 leading-relaxed font-medium">{strategy}</p>
+                                        </li>
+                                    ))}
+                                </ul>
+                            </div>
+
+                            <div className="grid grid-cols-3 gap-4">
+                                <div className="bg-gray-50 p-4 rounded-xl border border-gray-100 text-center">
+                                    <p className="text-[11px] font-bold text-gray-500 uppercase tracking-wider mb-1">Par 3 평균 오버파</p>
+                                    <p className="text-lg font-black text-gray-800">{reportData.stats.par3Avg}</p>
+                                </div>
+                                <div className="bg-gray-50 p-4 rounded-xl border border-gray-100 text-center">
+                                    <p className="text-[11px] font-bold text-gray-500 uppercase tracking-wider mb-1">Par 4 평균 오버파</p>
+                                    <p className="text-lg font-black text-gray-800">{reportData.stats.par4Avg}</p>
+                                </div>
+                                <div className="bg-gray-50 p-4 rounded-xl border border-gray-100 text-center">
+                                    <p className="text-[11px] font-bold text-gray-500 uppercase tracking-wider mb-1">Par 5 평균 오버파</p>
+                                    <p className="text-lg font-black text-gray-800">{reportData.stats.par5Avg}</p>
+                                </div>
+                            </div>
+
+                        </div>
+                    </div>
+                </div>
+            );
+        };
+
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<App />);
+    </script>
+</body>
+</html>
