@@ -68,7 +68,9 @@
             const [isSaving, setIsSaving] = useState(false);
             const [resultMsg, setResultMsg] = useState("");
             const [errorMsg, setErrorMsg] = useState("");
-            const [scriptUrl, setScriptUrl] = useState(() => localStorage.getItem('GOLF_GAS_URL') || "");
+            
+            // 배포된 Apps Script URL이 초기값으로 들어갑니다.
+            const [scriptUrl, setScriptUrl] = useState(() => localStorage.getItem('GOLF_GAS_URL') || "https://script.google.com/macros/s/AKfycbyyc7qVzufcIO1R4HYTVvCG3VFcIEt-D4q7E8GGkVQxCyHN5wdnwm6RFDe3ixIY7jHzSQ/exec");
             const [showUrlSettings, setShowUrlSettings] = useState(false);
 
             // AI 판독 결과 데이터 (실시간 검수 및 편집 상태)
@@ -91,102 +93,50 @@
                 reader.onerror = error => reject(error);
             });
 
-            const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
-
-            const fetchWithRetry = async (url, options, maxRetries = 3) => {
-                let delay = 1000;
-                for (let i = 0; i < maxRetries; i++) {
-                    try {
-                        const response = await fetch(url, options);
-                        if (response.status === 429) {
-                            await sleep(delay);
-                            delay *= 2;
-                            continue;
-                        }
-                        if (!response.ok) throw new Error(`HTTP ${response.status}`);
-                        return await response.json();
-                    } catch (err) {
-                        if (i === maxRetries - 1) throw err;
-                        await sleep(delay);
-                        delay *= 2;
-                    }
-                }
-            };
-
+            // 프론트엔드 API키 호출 제거 -> 구글 Apps Script로 분석 위임 (안전한 백엔드 방식)
             const handleAnalyze = async () => {
+                if (!scriptUrl.trim()) {
+                    setShowUrlSettings(true);
+                    setErrorMsg("분석을 위해 'Apps Script 연동 설정'에 배포된 URL을 먼저 입력해주세요.");
+                    return;
+                }
+
                 if (!images.summary) {
                     setErrorMsg("최소한 스코어카드 사진(요약)은 업로드해주세요.");
                     return;
                 }
+                
                 setIsAnalyzing(true);
-                setResultMsg("AI가 이미지를 판독하고 있습니다... (약 10초 소요)");
+                setResultMsg("구글 서버를 통해 AI가 이미지를 판독하고 있습니다... (약 10초 소요)");
                 setErrorMsg("");
 
                 try {
                     const base64Summary = await fileToBase64(images.summary);
-                    let parts = [
-                        { text: `Analyze the provided golf scorecard images. Extract data into the requested JSON schema.
-                        - Convert all scores to relative to par (e.g., 0 for par, 1 for bogey, -1 for birdie, 2 for double bogey).
-                        - FW (Fairway Hit): 1 (Hit) or 0 (Miss). If Par 3, use empty string "".
-                        - GIR (Green In Regulation): 'Y' or 'N'.
-                        - Putts, Sand, Penalty: Extract exact numbers. If blank, use 0.
-                        - Course Names: Extract front and back nine names.
-                        - Ensure exactly 18 values in arrays.` },
-                        { inlineData: { mimeType: images.summary.type, data: base64Summary } }
-                    ];
-
-                    if (images.details) {
-                        const base64Details = await fileToBase64(images.details);
-                        parts.push({ inlineData: { mimeType: images.details.type, data: base64Details } });
-                    }
-
                     const payload = {
-                        contents: [{ role: "user", parts: parts }],
-                        generationConfig: {
-                            responseMimeType: "application/json",
-                            responseSchema: {
-                                type: "OBJECT",
-                                properties: {
-                                    date: { type: "STRING", description: "YYYY-MM-DD" },
-                                    time: { type: "STRING", description: "HH:MM" },
-                                    course: { type: "STRING" },
-                                    frontNineName: { type: "STRING" },
-                                    backNineName: { type: "STRING" },
-                                    par: { type: "ARRAY", items: { type: "NUMBER" } },
-                                    myScore: { type: "ARRAY", items: { type: "NUMBER" } },
-                                    putts: { type: "ARRAY", items: { type: "NUMBER" } },
-                                    fw: { type: "ARRAY", items: { type: "STRING" } },
-                                    gir: { type: "ARRAY", items: { type: "STRING" } },
-                                    sand: { type: "ARRAY", items: { type: "NUMBER" } },
-                                    penalty: { type: "ARRAY", items: { type: "NUMBER" } },
-                                    partners: {
-                                        type: "ARRAY",
-                                        items: {
-                                            type: "OBJECT",
-                                            properties: {
-                                                name: { type: "STRING" },
-                                                score: { type: "ARRAY", items: { type: "NUMBER" } }
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        }
+                        action: 'analyze',
+                        summaryMimeType: images.summary.type,
+                        summaryBase64: base64Summary
                     };
 
-                    const apiKey = "";
-                    const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-3-flash-preview:generateContent?key=${apiKey}`;
+                    if (images.details) {
+                        payload.detailsMimeType = images.details.type;
+                        payload.detailsBase64 = await fileToBase64(images.details);
+                    }
 
-                    const result = await fetchWithRetry(apiUrl, {
+                    // 프론트엔드에서 Gemini가 아닌 구글 Apps Script로 바로 전송 (API 키 불필요)
+                    const response = await fetch(scriptUrl.trim(), {
                         method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
+                        headers: { 'Content-Type': 'text/plain;charset=utf-8' },
                         body: JSON.stringify(payload)
                     });
 
-                    if (!result.candidates || result.candidates.length === 0) {
-                        throw new Error("AI 응답을 받지 못했습니다.");
+                    const result = await response.json();
+
+                    if (result.error) {
+                        throw new Error(result.error);
                     }
 
+                    // Apps Script가 돌려준 Gemini JSON 결과 파싱
                     let jsonStr = result.candidates[0].content.parts[0].text;
                     if (jsonStr.includes('```')) {
                         jsonStr = jsonStr.replace(/```json/g, '').replace(/```/g, '').trim();
@@ -223,7 +173,7 @@
                     setResultMsg("✅ 분석 완료! 아래 검수 테이블에서 확인 후 구글 시트에 자동 기록하세요.");
                 } catch (err) {
                     console.error(err);
-                    setErrorMsg("분석 중 오류가 발생했습니다: 사진 상태를 확인해 주세요.");
+                    setErrorMsg("분석 중 오류가 발생했습니다: 연동된 URL 상태나 사진을 확인해 주세요.");
                     setResultMsg("");
                 } finally {
                     setIsAnalyzing(false);
@@ -254,34 +204,44 @@
             };
 
             const handleSyncToGoogleSheets = async () => {
-                // 고객님의 최신 구글 웹훅 URL 고정
-                const WEBHOOK_URL = "https://script.google.com/macros/s/AKfycbyyc7qVzufcIO1R4HYTVvCG3VFcIEt-D4q7E8GGkVQxCyHN5wdnwm6RFDe3ixIY7jHzSQ/exec";
-            
+                if (!scriptUrl.trim()) {
+                    setShowUrlSettings(true);
+                    setErrorMsg("구글 시트 연동을 위해 'Apps Script 웹앱 URL'을 먼저 입력해주세요.");
+                    return;
+                }
+
                 setIsSaving(true);
                 setErrorMsg("");
                 setResultMsg("구글 시트에 데이터를 기록하고 있습니다...");
-            
+
                 try {
-                    // mode: 'no-cors'를 제거하고 text/plain으로 위장하여 CORS 보안 완벽 우회
-                    const response = await fetch(WEBHOOK_URL, {
+                    const response = await fetch(scriptUrl.trim(), {
                         method: 'POST',
                         headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-                        body: JSON.stringify(editableData)
+                        body: JSON.stringify({ action: 'save', data: editableData }) // action: 'save' 명시
                     });
-            
+
                     const result = await response.json();
-            
+
                     if (result.status === "success" || result.result === "success") {
-                        setResultMsg(`🎉 성공적으로 기록되었습니다! (라운드 No. ${result.no || ''})`);
-                        // 성공 시 화면 자동 새로고침하여 통계 데이터 갱신
-                        setTimeout(() => window.location.reload(), 1500);
+                        localStorage.setItem('GOLF_GAS_URL', scriptUrl.trim());
+                        setResultMsg(`🎉 성공적으로 기록되었습니다!`);
+                        
+                        if (onSaveSuccess) {
+                            setTimeout(() => {
+                                onSaveSuccess();
+                                window.location.reload();
+                            }, 1500);
+                        } else {
+                            setTimeout(() => window.location.reload(), 1500);
+                        }
                     } else {
-                        setErrorMsg("시트 기록 중 오류가 발생했습니다: " + (result.message || "다시 시도해주세요."));
+                        setErrorMsg("시트 기록 중 오류가 발생했습니다: " + (result.message || "확인 필요"));
                         setResultMsg("");
                     }
                 } catch (err) {
                     console.error("전송 에러:", err);
-                    setErrorMsg("구글 시트 전송에 실패했습니다. (보안 차단 또는 네트워크 문제)");
+                    setErrorMsg("구글 시트 저장 실패: 보안 차단 또는 네트워크 문제 (URL을 확인하세요).");
                     setResultMsg("");
                 } finally {
                     setIsSaving(false);
@@ -322,7 +282,7 @@
                                     <div className="flex gap-2">
                                         <input 
                                             type="text" 
-                                            placeholder="https://script.google.com/macros/s/.../exec"
+                                            placeholder="[https://script.google.com/macros/s/.../exec](https://script.google.com/macros/s/.../exec)"
                                             className="flex-1 px-3 py-2 rounded-xl text-xs text-gray-800 outline-none font-mono"
                                             value={scriptUrl}
                                             onChange={(e) => setScriptUrl(e.target.value)}
@@ -650,7 +610,7 @@
                                     구글 시트에 즉시 자동 기록하기
                                 </button>
                                 <a 
-                                    href="https://docs.google.com/spreadsheets/d/1fH5iCTpsHwJbHG7Qh7Rot5zNfqB05DYfKbu2gStFD7g/edit" 
+                                    href="[https://docs.google.com/spreadsheets/d/1fH5iCTpsHwJbHG7Qh7Rot5zNfqB05DYfKbu2gStFD7g/edit](https://docs.google.com/spreadsheets/d/1fH5iCTpsHwJbHG7Qh7Rot5zNfqB05DYfKbu2gStFD7g/edit)" 
                                     target="_blank" 
                                     rel="noopener noreferrer"
                                     className="py-3.5 px-6 rounded-xl font-bold text-sm text-gray-600 bg-gray-100 hover:bg-gray-200 flex justify-center items-center gap-2 transition-all border border-gray-200"
@@ -695,7 +655,7 @@
                     setIsLoading(true);
                     const sheetId = '1fH5iCTpsHwJbHG7Qh7Rot5zNfqB05DYfKbu2gStFD7g';
                     const ts = new Date().getTime();
-                    const exportUrl = `https://docs.google.com/spreadsheets/d/${sheetId}/export?format=xlsx&nocache=${ts}`;
+                    const exportUrl = `[https://docs.google.com/spreadsheets/d/$](https://docs.google.com/spreadsheets/d/$){sheetId}/export?format=xlsx&nocache=${ts}`;
 
                     const response = await fetch(exportUrl);
                     if (!response.ok) throw new Error(`HTTP Error ${response.status}`);
@@ -1055,8 +1015,8 @@
             );
         };
 
-        const PlusIcon = () => <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>;
-        const MinusIcon = () => <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="5" y1="12" x2="19" y2="12"></line></svg>;
+        const PlusIcon = () => <svg xmlns="[http://www.w3.org/2000/svg](http://www.w3.org/2000/svg)" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>;
+        const MinusIcon = () => <svg xmlns="[http://www.w3.org/2000/svg](http://www.w3.org/2000/svg)" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="5" y1="12" x2="19" y2="12"></line></svg>;
 
         const DashboardTab = ({ data }) => {
             const [viewMode, setViewMode] = useState('year'); 
