@@ -61,19 +61,23 @@
             return <span ref={ref} className="contents" dangerouslySetInnerHTML={{ __html: `<i data-lucide="${name}" class="${className}"></i>` }} />;
         };
 
-        const AIVisionUploadTab = ({ onSaveSuccess }) => {
+        const AIVisionUploadTab = () => {
+            // ↓↓↓ 2. 배포된 구글 앱스 스크립트 웹 앱 URL을 여기에 넣으세요 ↓↓↓
+            const GAS_WEB_APP_URL = "https://script.google.com/macros/s/AKfycbzyEnt062Ec-CuNqJ6HSlwOxRAPKiJr6tZMOq9RTj9Uwhau9tcYuN1-QZkzm9721aG5/exec";
+            // ↑↑↑================================================================↑↑↑
+        
             const [images, setImages] = useState({ summary: null, details: null });
             const [previews, setPreviews] = useState({ summary: null, details: null });
+            
             const [isAnalyzing, setIsAnalyzing] = useState(false);
             const [isSaving, setIsSaving] = useState(false);
+            
             const [resultMsg, setResultMsg] = useState("");
             const [errorMsg, setErrorMsg] = useState("");
             
-            const [scriptUrl, setScriptUrl] = useState(() => localStorage.getItem('GOLF_GAS_URL') || "https://script.google.com/macros/s/AKfycbyyc7qVzufcIO1R4HYTVvCG3VFcIEt-D4q7E8GGkVQxCyHN5wdnwm6RFDe3ixIY7jHzSQ/exec");
-            const [showUrlSettings, setShowUrlSettings] = useState(false);
-
-            const [editableData, setEditableData] = useState(null);
-
+            // AI 분석 결과를 담을 상태 (검수용 데이터)
+            const [analyzedData, setAnalyzedData] = useState(null);
+        
             const handleFileChange = (type, e) => {
                 const file = e.target.files[0];
                 if (file) {
@@ -83,476 +87,267 @@
                     reader.readAsDataURL(file);
                 }
             };
-
+        
             const fileToBase64 = (file) => new Promise((resolve, reject) => {
                 const reader = new FileReader();
                 reader.readAsDataURL(file);
                 reader.onload = () => resolve(reader.result.split(',')[1]);
                 reader.onerror = error => reject(error);
             });
-
-            // Apps Script 백엔드(서버)로 분석 요청 전송
+        
+            // 1. GAS에 AI 분석 요청
             const handleAnalyze = async () => {
-                if (!scriptUrl.trim()) {
-                    setShowUrlSettings(true);
-                    setErrorMsg("분석을 위해 'Apps Script 연동 설정'에 배포된 URL을 먼저 입력해주세요.");
-                    return;
-                }
-
                 if (!images.summary) {
-                    setErrorMsg("최소한 스코어카드 사진(요약)은 업로드해주세요.");
+                    setErrorMsg("스코어카드 요약 사진은 필수입니다.");
                     return;
                 }
-                
                 setIsAnalyzing(true);
-                setResultMsg("구글 서버를 통해 AI가 이미지를 판독하고 있습니다... (약 10초 소요)");
+                setResultMsg("AI가 이미지를 판독하고 있습니다... (약 10초 소요)");
                 setErrorMsg("");
-
+                setAnalyzedData(null);
+        
                 try {
                     const base64Summary = await fileToBase64(images.summary);
-                    const payload = {
-                        action: 'analyze',
-                        summaryMimeType: images.summary.type,
-                        summaryBase64: base64Summary
+                    let payloadImages = { 
+                        summary: { type: images.summary.type, base64: base64Summary } 
                     };
-
+        
                     if (images.details) {
-                        payload.detailsMimeType = images.details.type;
-                        payload.detailsBase64 = await fileToBase64(images.details);
+                        const base64Details = await fileToBase64(images.details);
+                        payloadImages.details = { type: images.details.type, base64: base64Details };
                     }
-
-                    const response = await fetch(scriptUrl.trim(), {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-                        body: JSON.stringify(payload)
+        
+                    const response = await fetch(GAS_WEB_APP_URL, {
+                        method: "POST",
+                        body: JSON.stringify({ action: "analyze", images: payloadImages })
                     });
-
+        
                     const result = await response.json();
-
-                    if (result.error) {
+        
+                    if (result.success) {
+                        setAnalyzedData(result.data); // 결과 데이터를 State에 저장하여 테이블 렌더링
+                        setResultMsg("✅ 분석 완료! 아래 테이블을 검수 및 수정 후 저장해주세요.");
+                    } else {
                         throw new Error(result.error);
                     }
-
-                    let jsonStr = result.candidates[0].content.parts[0].text;
-                    if (jsonStr.includes('```')) {
-                        jsonStr = jsonStr.replace(/```json/g, '').replace(/```/g, '').trim();
-                    }
-                    const data = JSON.parse(jsonStr);
-
-                    const safe = (arr, len, def) => {
-                        const r = Array.isArray(arr) ? [...arr] : [];
-                        while(r.length < len) r.push(def);
-                        return r.slice(0, len);
-                    };
-
-                    const normalizedData = {
-                        date: data.date || new Date().toISOString().substring(0, 10),
-                        time: data.time || "07:00",
-                        course: data.course || "골프장",
-                        frontNineName: data.frontNineName || "전반",
-                        backNineName: data.backNineName || "후반",
-                        par: safe(data.par, 18, 4),
-                        myScore: safe(data.myScore, 18, 0),
-                        putts: safe(data.putts, 18, 2),
-                        fw: safe(data.fw, 18, ""),
-                        gir: safe(data.gir, 18, ""),
-                        sand: safe(data.sand, 18, 0),
-                        penalty: safe(data.penalty, 18, 0),
-                        partners: Array.isArray(data.partners) ? data.partners.map(p => ({
-                            name: p.name || "",
-                            score: safe(p.score, 18, 0)
-                        })) : []
-                    };
-                    
-                    setEditableData(normalizedData);
-                    setResultMsg("✅ 분석 완료! 아래 검수 테이블에서 확인 후 구글 시트에 자동 기록하세요.");
                 } catch (err) {
                     console.error(err);
-                    setErrorMsg("분석 중 오류가 발생했습니다: 연동된 URL 상태나 사진을 확인해 주세요.");
+                    setErrorMsg(`분석 실패: ${err.message}`);
                     setResultMsg("");
                 } finally {
                     setIsAnalyzing(false);
                 }
             };
-
-            const updateField = (category, index, value, partnerIdx = null) => {
-                if (!editableData) return;
-                setEditableData(prev => {
-                    const next = { ...prev };
-                    if (partnerIdx !== null) {
-                        const newPartners = [...next.partners];
-                        newPartners[partnerIdx].score[index] = Number(value) || 0;
-                        next.partners = newPartners;
-                    } else if (category === 'partnerName') {
-                        const newPartners = [...next.partners];
-                        newPartners[index].name = value;
-                        next.partners = newPartners;
-                    } else if (Array.isArray(next[category])) {
-                        const newArr = [...next[category]];
-                        newArr[index] = (category === 'fw' || category === 'gir') ? value : (value === '' ? '' : Number(value) || 0);
-                        next[category] = newArr;
+        
+            // 실시간 수정 핸들러 (배열 데이터)
+            const handleArrayChange = (key, index, value) => {
+                setAnalyzedData(prev => {
+                    const newArr = [...prev[key]];
+                    // 숫자가 들어가야 하는 항목들 처리
+                    if (['par', 'myScore', 'putts', 'penalty', 'sand'].includes(key)) {
+                        newArr[index] = value === "" ? "" : Number(value);
                     } else {
-                        next[category] = value;
+                        newArr[index] = value;
                     }
-                    return next;
+                    return { ...prev, [key]: newArr };
                 });
             };
-
-            const handleSyncToGoogleSheets = async () => {
-                if (!scriptUrl.trim()) {
-                    setShowUrlSettings(true);
-                    setErrorMsg("구글 시트 연동을 위해 'Apps Script 웹앱 URL'을 먼저 입력해주세요.");
-                    return;
-                }
-
+        
+            // 2. 구글 시트로 최종 저장 요청
+            const handleSaveToSheet = async () => {
                 setIsSaving(true);
+                setResultMsg("구글 시트에 데이터를 저장하고 있습니다...");
                 setErrorMsg("");
-                setResultMsg("구글 시트에 데이터를 기록하고 있습니다...");
-
+        
                 try {
-                    const response = await fetch(scriptUrl.trim(), {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-                        body: JSON.stringify({ action: 'save', data: editableData }) 
+                    const response = await fetch(GAS_WEB_APP_URL, {
+                        method: "POST",
+                        body: JSON.stringify({ action: "save", data: analyzedData })
                     });
-
+        
                     const result = await response.json();
-
-                    if (result.status === "success" || result.result === "success") {
-                        localStorage.setItem('GOLF_GAS_URL', scriptUrl.trim());
-                        setResultMsg(`🎉 성공적으로 기록되었습니다!`);
-                        
-                        if (onSaveSuccess) {
-                            setTimeout(() => {
-                                onSaveSuccess();
-                                window.location.reload();
-                            }, 1500);
-                        } else {
-                            setTimeout(() => window.location.reload(), 1500);
-                        }
+        
+                    if (result.success) {
+                        alert(`성공적으로 저장되었습니다!\n${result.message}`);
+                        // 저장 성공 시 앱을 새로고침하여 최신 구글 시트 데이터를 다시 로드함
+                        window.location.reload(); 
                     } else {
-                        setErrorMsg("시트 기록 중 오류가 발생했습니다: " + (result.message || "확인 필요"));
-                        setResultMsg("");
+                        throw new Error(result.error);
                     }
                 } catch (err) {
-                    console.error("전송 에러:", err);
-                    setErrorMsg("구글 시트 저장 실패: 보안 차단 또는 네트워크 문제 (URL을 확인하세요).");
+                    console.error(err);
+                    setErrorMsg(`저장 실패: ${err.message}`);
                     setResultMsg("");
-                } finally {
                     setIsSaving(false);
                 }
             };
-
+        
             return (
-                <div className="animate-fade-in p-2 md:p-6 max-w-6xl mx-auto pb-24 space-y-6">
+                <div className="animate-fade-in p-2 md:p-8 max-w-6xl mx-auto pb-20">
                     <div className="bg-white rounded-3xl shadow-sm border border-gray-100 overflow-hidden relative">
+                        
                         <div className="bg-gradient-to-br from-emerald-600 to-teal-800 p-6 md:p-8 text-white relative overflow-hidden">
-                            <div className="absolute top-0 right-0 w-64 h-64 bg-white/10 rounded-full blur-3xl -translate-y-1/2 translate-x-1/3"></div>
-                            <div className="relative z-10 flex flex-col sm:flex-row justify-between sm:items-center gap-4">
-                                <div>
-                                    <h2 className="text-xl md:text-2xl font-black mb-1 flex items-center gap-2">
-                                        <LucideIcon name="sparkles" className="w-6 h-6 text-emerald-300" />
-                                        AI 스코어 변환 & 자동 기록
-                                    </h2>
-                                    <p className="text-emerald-100 text-xs md:text-sm opacity-90 max-w-lg">
-                                        스코어카드 사진을 올리면 AI가 즉시 판독하여 실시간 검수 테이블에 채워주고, 버튼 클릭 한 번으로 구글 시트에 자동 기록 및 대시보드가 새로고침됩니다.
-                                    </p>
-                                </div>
-                                <button 
-                                    onClick={() => setShowUrlSettings(!showUrlSettings)}
-                                    className="px-3 py-1.5 bg-white/15 hover:bg-white/25 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-colors self-start sm:self-auto border border-white/20"
-                                >
-                                    <LucideIcon name="settings" className="w-3.5 h-3.5" />
-                                    Apps Script 연동 설정
-                                </button>
+                            <div className="relative z-10">
+                                <h2 className="text-xl md:text-2xl font-black mb-2 flex items-center gap-2">
+                                    <LucideIcon name="sparkles" className="w-6 h-6 text-emerald-300" />
+                                    AI 스코어 분석 및 자동 기록
+                                </h2>
+                                <p className="text-emerald-100 text-[13px] md:text-sm opacity-90 max-w-lg leading-relaxed">
+                                    사진을 업로드하면 AI가 분석한 후, 검수를 거쳐 구글 시트에 기존 수식을 유지하며 즉시 자동 저장됩니다.
+                                </p>
                             </div>
-
-                            {showUrlSettings && (
-                                <div className="mt-4 pt-4 border-t border-white/20 animate-fade-in">
-                                    <label className="block text-xs font-bold text-emerald-200 mb-1">
-                                        Google Apps Script 웹 앱 URL (배포 URL)
-                                    </label>
-                                    <div className="flex gap-2">
-                                        <input 
-                                            type="text" 
-                                            placeholder="[https://script.google.com/macros/s/.../exec](https://script.google.com/macros/s/.../exec)"
-                                            className="flex-1 px-3 py-2 rounded-xl text-xs text-gray-800 outline-none font-mono"
-                                            value={scriptUrl}
-                                            onChange={(e) => setScriptUrl(e.target.value)}
-                                        />
-                                        <button 
-                                            onClick={() => {
-                                                localStorage.setItem('GOLF_GAS_URL', scriptUrl.trim());
-                                                setShowUrlSettings(false);
-                                            }}
-                                            className="px-4 py-2 bg-emerald-500 hover:bg-emerald-400 font-bold text-xs rounded-xl text-white transition-colors"
-                                        >
-                                            저장
-                                        </button>
-                                    </div>
-                                    <p className="text-[11px] text-emerald-200/80 mt-1.5">
-                                        * 구글 시트의 [확장 프로그램 > Apps Script]에서 `google_apps_script.js`를 웹 앱으로 배포한 후 주소를 입력하세요.
-                                    </p>
-                                </div>
-                            )}
                         </div>
-
-                        <div className="p-5 md:p-6 space-y-4">
-                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                <div className="border-2 border-dashed border-gray-200 bg-gray-50 rounded-2xl p-5 flex flex-col items-center justify-center text-center hover:border-emerald-400 hover:bg-emerald-50 transition-colors group cursor-pointer relative min-h-[180px]">
+        
+                        <div className="p-5 md:p-8 space-y-6">
+                            {/* 사진 업로드 영역 */}
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 md:gap-6">
+                                <div className="border-2 border-dashed border-gray-200 bg-gray-50 rounded-2xl p-6 flex flex-col items-center justify-center text-center hover:border-emerald-400 hover:bg-emerald-50 transition-colors group cursor-pointer relative min-h-[220px]">
                                     <input type="file" accept="image/*" className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10" onChange={(e) => handleFileChange('summary', e)} />
                                     {previews.summary ? (
-                                        <img src={previews.summary} alt="Summary" className="w-full h-full object-contain max-h-40 rounded-lg" />
+                                        <img src={previews.summary} alt="Summary" className="w-full h-full object-contain max-h-48 rounded-lg" />
                                     ) : (
                                         <>
-                                            <div className="w-12 h-12 bg-white shadow-sm rounded-full flex items-center justify-center mb-2 group-hover:scale-110 transition-transform">
-                                                <LucideIcon name="image" className="w-5 h-5 text-gray-400 group-hover:text-emerald-500" />
-                                            </div>
-                                            <h4 className="font-bold text-gray-700 text-sm mb-0.5">1. 스코어 요약 사진 (필수)</h4>
-                                            <p className="text-xs text-gray-400">구장명, 날짜, 동반자 점수</p>
+                                            <LucideIcon name="image" className="w-8 h-8 text-gray-400 group-hover:text-emerald-500 mb-2" />
+                                            <h4 className="font-bold text-gray-700 text-sm mb-1">1. 스코어 요약 사진 (필수)</h4>
                                         </>
                                     )}
                                 </div>
-
-                                <div className="border-2 border-dashed border-gray-200 bg-gray-50 rounded-2xl p-5 flex flex-col items-center justify-center text-center hover:border-emerald-400 hover:bg-emerald-50 transition-colors group cursor-pointer relative min-h-[180px]">
+        
+                                <div className="border-2 border-dashed border-gray-200 bg-gray-50 rounded-2xl p-6 flex flex-col items-center justify-center text-center hover:border-emerald-400 hover:bg-emerald-50 transition-colors group cursor-pointer relative min-h-[220px]">
                                     <input type="file" accept="image/*" className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10" onChange={(e) => handleFileChange('details', e)} />
                                     {previews.details ? (
-                                        <img src={previews.details} alt="Details" className="w-full h-full object-contain max-h-40 rounded-lg" />
+                                        <img src={previews.details} alt="Details" className="w-full h-full object-contain max-h-48 rounded-lg" />
                                     ) : (
                                         <>
-                                            <div className="w-12 h-12 bg-white shadow-sm rounded-full flex items-center justify-center mb-2 group-hover:scale-110 transition-transform">
-                                                <LucideIcon name="image-plus" className="w-5 h-5 text-gray-400 group-hover:text-emerald-500" />
-                                            </div>
-                                            <h4 className="font-bold text-gray-700 text-sm mb-0.5">2. 세부 기록 사진 (선택)</h4>
-                                            <p className="text-xs text-gray-400">퍼트, FW, 페널티, 벙커샷</p>
+                                            <LucideIcon name="image-plus" className="w-8 h-8 text-gray-400 group-hover:text-emerald-500 mb-2" />
+                                            <h4 className="font-bold text-gray-700 text-sm mb-1">2. 세부 기록 사진 (선택)</h4>
                                         </>
                                     )}
                                 </div>
                             </div>
-
+        
+                            {/* 메시지 출력 영역 */}
                             {errorMsg && (
-                                <div className="p-3.5 bg-red-50 text-red-600 rounded-xl text-xs md:text-sm font-bold flex items-center gap-2 border border-red-100">
-                                    <LucideIcon name="alert-circle" className="w-4 h-4 shrink-0" />
+                                <div className="p-4 bg-red-50 text-red-600 rounded-xl text-sm font-bold flex items-center gap-2 border border-red-100">
+                                    <LucideIcon name="alert-circle" className="w-5 h-5 shrink-0" />
                                     {errorMsg}
                                 </div>
                             )}
-
+                            
                             {resultMsg && !errorMsg && (
-                                <div className={`p-3.5 rounded-xl text-xs md:text-sm font-bold flex items-center gap-2 border ${isAnalyzing || isSaving ? 'bg-blue-50 text-blue-600 border-blue-100' : 'bg-emerald-50 text-emerald-600 border-emerald-100'}`}>
-                                    {isAnalyzing || isSaving ? <LucideIcon name="loader-2" className="w-4 h-4 shrink-0 animate-spin" /> : <LucideIcon name="check-circle" className="w-4 h-4 shrink-0" />}
+                                <div className={`p-4 rounded-xl text-[13px] md:text-sm font-bold flex items-center gap-2 border ${isAnalyzing || isSaving ? 'bg-blue-50 text-blue-600 border-blue-100' : 'bg-emerald-50 text-emerald-600 border-emerald-100'}`}>
+                                    {(isAnalyzing || isSaving) ? <LucideIcon name="loader-2" className="w-5 h-5 shrink-0 animate-spin" /> : <LucideIcon name="check-circle" className="w-5 h-5 shrink-0" />}
                                     {resultMsg}
                                 </div>
                             )}
-
-                            <button 
-                                onClick={handleAnalyze} 
-                                disabled={isAnalyzing}
-                                className={`w-full py-3.5 rounded-xl font-black text-base flex justify-center items-center gap-2 transition-all shadow-md ${isAnalyzing ? 'bg-gray-200 text-gray-400 cursor-not-allowed' : 'bg-slate-900 hover:bg-slate-800 text-white hover:shadow-lg'}`}
-                            >
-                                {isAnalyzing ? <>AI가 스코어를 분석하고 있습니다...</> : <><LucideIcon name="sparkles" className="w-5 h-5 text-emerald-400" /> 사진 판독 및 검수 테이블 생성</>}
-                            </button>
-                        </div>
-                    </div>
-
-                    {/* 실시간 검수 및 편집 테이블 (AI 판독 후 노출) */}
-                    {editableData && (
-                        <div className="bg-white rounded-3xl shadow-sm border border-gray-100 p-5 md:p-6 space-y-5 animate-fade-in">
-                            <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 border-b border-gray-100 pb-4">
-                                <div>
-                                    <h3 className="text-lg font-black text-gray-800 flex items-center gap-2">
-                                        <LucideIcon name="edit-3" className="w-5 h-5 text-emerald-600" />
-                                        실시간 검수 및 수정 테이블
-                                    </h3>
-                                    <p className="text-xs text-gray-400">숫자를 클릭하여 바로 수정할 수 있으며, 수정된 값이 즉시 계산되어 구글 시트에 전송됩니다.</p>
-                                </div>
-
-                                <div className="flex items-center gap-2">
-                                    <button
-                                        onClick={handleSyncToGoogleSheets}
+        
+                            {!analyzedData && (
+                                <button 
+                                    onClick={handleAnalyze} 
+                                    disabled={isAnalyzing}
+                                    className={`w-full py-4 rounded-xl font-black text-lg flex justify-center items-center gap-2 transition-all shadow-md ${isAnalyzing ? 'bg-gray-200 text-gray-400 cursor-not-allowed' : 'bg-gray-900 hover:bg-gray-800 text-white hover:shadow-lg'}`}
+                                >
+                                    <LucideIcon name="bot" className="w-5 h-5" />
+                                    AI 데이터 추출 시작
+                                </button>
+                            )}
+        
+                            {/* 분석 완료 후 나타나는 실시간 검수 테이블 */}
+                            {analyzedData && (
+                                <div className="mt-8 animate-fade-in space-y-4 border-t border-gray-100 pt-6">
+                                    <div className="flex flex-wrap gap-4 mb-4 items-center">
+                                        <div className="flex items-center gap-2">
+                                            <span className="text-sm font-bold text-gray-600">일시:</span>
+                                            <input type="date" value={analyzedData.date || ""} onChange={(e) => setAnalyzedData({...analyzedData, date: e.target.value})} className="border p-1.5 rounded-md text-sm font-medium focus:ring-2 outline-none" />
+                                        </div>
+                                        <div className="flex items-center gap-2">
+                                            <span className="text-sm font-bold text-gray-600">구장:</span>
+                                            <input type="text" value={analyzedData.course || ""} onChange={(e) => setAnalyzedData({...analyzedData, course: e.target.value})} className="border p-1.5 rounded-md text-sm font-medium w-40" />
+                                        </div>
+                                    </div>
+        
+                                    <div className="overflow-x-auto rounded-xl border border-gray-200 shadow-sm">
+                                        <table className="w-full text-center text-xs whitespace-nowrap">
+                                            <thead className="bg-slate-50 text-slate-500 uppercase tracking-wider">
+                                                <tr>
+                                                    <th className="p-2 border-r border-b w-16">구분</th>
+                                                    {[1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18].map(h => <th key={h} className="p-2 border-r border-b w-10">{h}</th>)}
+                                                </tr>
+                                            </thead>
+                                            <tbody>
+                                                <tr>
+                                                    <td className="p-2 border-r border-b font-bold bg-slate-100 text-gray-600">Par</td>
+                                                    {analyzedData.par?.map((val, i) => (
+                                                        <td key={i} className="p-1 border-r border-b"><input type="number" value={val} onChange={(e) => handleArrayChange('par', i, e.target.value)} className="w-full text-center bg-transparent outline-none font-medium" /></td>
+                                                    ))}
+                                                </tr>
+                                                <tr>
+                                                    <td className="p-2 border-r border-b font-bold bg-blue-50 text-blue-600">타수(상대)</td>
+                                                    {analyzedData.myScore?.map((val, i) => (
+                                                        <td key={i} className="p-1 border-r border-b bg-blue-50/30"><input type="number" value={val} onChange={(e) => handleArrayChange('myScore', i, e.target.value)} className="w-full text-center bg-transparent outline-none font-bold text-blue-700" /></td>
+                                                    ))}
+                                                </tr>
+                                                <tr>
+                                                    <td className="p-2 border-r border-b font-bold text-gray-600">퍼트</td>
+                                                    {analyzedData.putts?.map((val, i) => (
+                                                        <td key={i} className="p-1 border-r border-b"><input type="number" value={val} onChange={(e) => handleArrayChange('putts', i, e.target.value)} className="w-full text-center bg-transparent outline-none font-medium" /></td>
+                                                    ))}
+                                                </tr>
+                                                <tr>
+                                                    <td className="p-2 border-r border-b font-bold text-gray-600">F/W (Y/N)</td>
+                                                    {analyzedData.fw?.map((val, i) => (
+                                                        <td key={i} className="p-1 border-r border-b"><input type="text" value={val || ""} onChange={(e) => handleArrayChange('fw', i, e.target.value.toUpperCase())} className="w-full text-center bg-transparent outline-none font-bold text-emerald-600 uppercase" maxLength={1} /></td>
+                                                    ))}
+                                                </tr>
+                                                <tr>
+                                                    <td className="p-2 border-r border-b font-bold text-gray-600">GIR (Y/N)</td>
+                                                    {analyzedData.gir?.map((val, i) => (
+                                                        <td key={i} className="p-1 border-r border-b"><input type="text" value={val || ""} onChange={(e) => handleArrayChange('gir', i, e.target.value.toUpperCase())} className="w-full text-center bg-transparent outline-none font-bold text-indigo-600 uppercase" maxLength={1} /></td>
+                                                    ))}
+                                                </tr>
+                                                <tr>
+                                                    <td className="p-2 border-r border-b font-bold text-gray-600">벌타</td>
+                                                    {analyzedData.penalty?.map((val, i) => (
+                                                        <td key={i} className="p-1 border-r border-b"><input type="number" value={val} onChange={(e) => handleArrayChange('penalty', i, e.target.value)} className="w-full text-center bg-transparent outline-none font-bold text-red-500" /></td>
+                                                    ))}
+                                                </tr>
+                                                <tr>
+                                                    <td className="p-2 border-r border-b font-bold text-gray-600">벙커</td>
+                                                    {analyzedData.sand?.map((val, i) => (
+                                                        <td key={i} className="p-1 border-r border-b"><input type="number" value={val} onChange={(e) => handleArrayChange('sand', i, e.target.value)} className="w-full text-center bg-transparent outline-none font-bold text-yellow-600" /></td>
+                                                    ))}
+                                                </tr>
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                    
+                                    <p className="text-xs text-gray-400 flex items-center gap-1 mt-2">
+                                        <LucideIcon name="info" className="w-4 h-4" />
+                                        각 항목을 클릭하여 수정할 수 있습니다. 수정을 완료했다면 아래 버튼을 눌러 시트에 저장하세요.
+                                    </p>
+        
+                                    <button 
+                                        onClick={handleSaveToSheet} 
                                         disabled={isSaving}
-                                        className={`px-5 py-2.5 rounded-xl font-black text-sm flex items-center gap-2 text-white shadow-md transition-all ${isSaving ? 'bg-emerald-300 cursor-wait' : 'bg-emerald-600 hover:bg-emerald-700 hover:shadow-lg'}`}
+                                        className={`w-full py-4 mt-6 rounded-xl font-black text-lg flex justify-center items-center gap-2 transition-all shadow-md ${isSaving ? 'bg-emerald-200 text-emerald-600 cursor-not-allowed' : 'bg-emerald-600 hover:bg-emerald-500 text-white hover:shadow-lg'}`}
                                     >
-                                        {isSaving ? <LucideIcon name="loader-2" className="w-4 h-4 animate-spin" /> : <LucideIcon name="send" className="w-4 h-4" />}
-                                        구글 시트에 즉시 자동 기록하기
+                                        {isSaving ? "저장 중..." : (
+                                            <>
+                                                <LucideIcon name="save" className="w-5 h-5" />
+                                                구글 시트에 즉시 자동 기록하기
+                                            </>
+                                        )}
                                     </button>
                                 </div>
-                            </div>
-
-                            <div className="grid grid-cols-2 sm:grid-cols-5 gap-3 bg-gray-50/80 p-3.5 rounded-2xl border border-gray-200/60 text-xs">
-                                <div>
-                                    <label className="text-[10px] text-gray-400 font-bold block mb-1">일시</label>
-                                    <input type="date" className="w-full bg-white border border-gray-200 rounded-lg px-2 py-1 font-semibold text-gray-800 text-xs" value={editableData.date} onChange={(e) => updateField('date', null, e.target.value)} />
-                                </div>
-                                <div>
-                                    <label className="text-[10px] text-gray-400 font-bold block mb-1">시간</label>
-                                    <input type="text" className="w-full bg-white border border-gray-200 rounded-lg px-2 py-1 font-semibold text-gray-800 text-xs" value={editableData.time} onChange={(e) => updateField('time', null, e.target.value)} />
-                                </div>
-                                <div>
-                                    <label className="text-[10px] text-gray-400 font-bold block mb-1">골프장 명</label>
-                                    <input type="text" className="w-full bg-white border border-gray-200 rounded-lg px-2 py-1 font-bold text-gray-800 text-xs" value={editableData.course} onChange={(e) => updateField('course', null, e.target.value)} />
-                                </div>
-                                <div>
-                                    <label className="text-[10px] text-gray-400 font-bold block mb-1">전반 코스</label>
-                                    <input type="text" className="w-full bg-white border border-gray-200 rounded-lg px-2 py-1 font-semibold text-gray-800 text-xs" value={editableData.frontNineName} onChange={(e) => updateField('frontNineName', null, e.target.value)} />
-                                </div>
-                                <div>
-                                    <label className="text-[10px] text-gray-400 font-bold block mb-1">후반 코스</label>
-                                    <input type="text" className="w-full bg-white border border-gray-200 rounded-lg px-2 py-1 font-semibold text-gray-800 text-xs" value={editableData.backNineName} onChange={(e) => updateField('backNineName', null, e.target.value)} />
-                                </div>
-                            </div>
-
-                            <div className="overflow-x-auto border border-gray-200 rounded-2xl shadow-sm">
-                                <table className="w-full text-center text-xs border-collapse">
-                                    <thead>
-                                        <tr className="bg-slate-100 text-slate-700 font-bold text-[11px]">
-                                            <th className="p-2 border-r border-b text-left pl-3 w-24">구분</th>
-                                            {[1,2,3,4,5,6,7,8,9].map(n => <th key={n} className="p-1 border-r border-b w-8">{n}</th>)}
-                                            <th className="p-1 border-r border-b bg-emerald-50 text-emerald-700 font-black w-10">전반</th>
-                                            {[10,11,12,13,14,15,16,17,18].map(n => <th key={n} className="p-1 border-r border-b w-8">{n}</th>)}
-                                            <th className="p-1 border-r border-b bg-blue-50 text-blue-700 font-black w-10">후반</th>
-                                            <th className="p-1 border-b bg-indigo-50 text-indigo-700 font-black w-12">Total</th>
-                                        </tr>
-                                    </thead>
-                                    <tbody className="divide-y divide-gray-100">
-                                        <tr className="hover:bg-gray-50/50">
-                                            <td className="p-1.5 border-r font-bold text-gray-500 text-left pl-3 bg-gray-50">정규 타수</td>
-                                            {editableData.par.slice(0, 9).map((p, i) => (
-                                                <td key={`par-f-${i}`} className="p-0.5 border-r"><input type="number" className="w-7 text-center rounded bg-gray-50 font-semibold text-gray-700" value={p} onChange={(e) => updateField('par', i, e.target.value)} /></td>
-                                            ))}
-                                            <td className="border-r bg-emerald-50/50 font-bold text-emerald-800">{editableData.par.slice(0, 9).reduce((a,b)=>a+(Number(b)||0),0)}</td>
-                                            {editableData.par.slice(9, 18).map((p, i) => (
-                                                <td key={`par-b-${i}`} className="p-0.5 border-r"><input type="number" className="w-7 text-center rounded bg-gray-50 font-semibold text-gray-700" value={p} onChange={(e) => updateField('par', i + 9, e.target.value)} /></td>
-                                            ))}
-                                            <td className="border-r bg-blue-50/50 font-bold text-blue-800">{editableData.par.slice(9, 18).reduce((a,b)=>a+(Number(b)||0),0)}</td>
-                                            <td className="bg-indigo-50/50 font-black text-indigo-800">{editableData.par.reduce((a,b)=>a+(Number(b)||0),0)}</td>
-                                        </tr>
-
-                                        <tr className="bg-yellow-50/20 hover:bg-yellow-50/40">
-                                            <td className="p-1.5 border-r font-black text-blue-700 text-left pl-3 bg-yellow-50/60">송봉근 (상대타수)</td>
-                                            {editableData.myScore.slice(0, 9).map((s, i) => (
-                                                <td key={`mys-f-${i}`} className="p-0.5 border-r"><input type="number" className="w-7 text-center rounded border border-blue-200 font-black text-blue-600 bg-white" value={s} onChange={(e) => updateField('myScore', i, e.target.value)} /></td>
-                                            ))}
-                                            <td className="border-r bg-emerald-100/50 font-black text-blue-700">
-                                                {editableData.par.slice(0, 9).reduce((acc, p, idx) => acc + p + (Number(editableData.myScore[idx]) || 0), 0)}
-                                            </td>
-                                            {editableData.myScore.slice(9, 18).map((s, i) => (
-                                                <td key={`mys-b-${i}`} className="p-0.5 border-r"><input type="number" className="w-7 text-center rounded border border-blue-200 font-black text-blue-600 bg-white" value={s} onChange={(e) => updateField('myScore', i + 9, e.target.value)} /></td>
-                                            ))}
-                                            <td className="border-r bg-blue-100/50 font-black text-blue-700">
-                                                {editableData.par.slice(9, 18).reduce((acc, p, idx) => acc + p + (Number(editableData.myScore[idx + 9]) || 0), 0)}
-                                            </td>
-                                            <td className="bg-indigo-100 font-black text-blue-800 text-sm">
-                                                {editableData.par.reduce((acc, p, idx) => acc + p + (Number(editableData.myScore[idx]) || 0), 0)}
-                                            </td>
-                                        </tr>
-
-                                        <tr className="hover:bg-gray-50/50">
-                                            <td className="p-1.5 border-r font-bold text-orange-600 text-left pl-3 bg-gray-50">Putts</td>
-                                            {editableData.putts.slice(0, 9).map((pt, i) => (
-                                                <td key={`pt-f-${i}`} className="p-0.5 border-r"><input type="number" className="w-7 text-center rounded border border-orange-200 font-semibold text-orange-600 bg-white" value={pt} onChange={(e) => updateField('putts', i, e.target.value)} /></td>
-                                            ))}
-                                            <td className="border-r bg-emerald-50/50 font-bold text-orange-600">{editableData.putts.slice(0, 9).reduce((a,b)=>a+(Number(b)||0),0)}</td>
-                                            {editableData.putts.slice(9, 18).map((pt, i) => (
-                                                <td key={`pt-b-${i}`} className="p-0.5 border-r"><input type="number" className="w-7 text-center rounded border border-orange-200 font-semibold text-orange-600 bg-white" value={pt} onChange={(e) => updateField('putts', i + 9, e.target.value)} /></td>
-                                            ))}
-                                            <td className="border-r bg-blue-50/50 font-bold text-orange-600">{editableData.putts.slice(9, 18).reduce((a,b)=>a+(Number(b)||0),0)}</td>
-                                            <td className="bg-indigo-50/50 font-black text-orange-600">{editableData.putts.reduce((a,b)=>a+(Number(b)||0),0)}</td>
-                                        </tr>
-
-                                        <tr className="hover:bg-gray-50/50">
-                                            <td className="p-1.5 border-r font-bold text-teal-600 text-left pl-3 bg-gray-50">FW (1/0)</td>
-                                            {editableData.fw.slice(0, 9).map((f, i) => (
-                                                <td key={`fw-f-${i}`} className="p-0.5 border-r"><input type="text" maxLength={1} className="w-7 text-center rounded border border-gray-200 font-bold text-teal-600 bg-white" value={f} onChange={(e) => updateField('fw', i, e.target.value)} /></td>
-                                            ))}
-                                            <td className="border-r bg-emerald-50/30 text-gray-300">-</td>
-                                            {editableData.fw.slice(9, 18).map((f, i) => (
-                                                <td key={`fw-b-${i}`} className="p-0.5 border-r"><input type="text" maxLength={1} className="w-7 text-center rounded border border-gray-200 font-bold text-teal-600 bg-white" value={f} onChange={(e) => updateField('fw', i + 9, e.target.value)} /></td>
-                                            ))}
-                                            <td className="border-r bg-blue-50/30 text-gray-300">-</td>
-                                            <td className="bg-indigo-50/30 text-gray-300">-</td>
-                                        </tr>
-
-                                        <tr className="hover:bg-gray-50/50">
-                                            <td className="p-1.5 border-r font-bold text-red-500 text-left pl-3 bg-gray-50">Panelty</td>
-                                            {editableData.penalty.slice(0, 9).map((pn, i) => (
-                                                <td key={`pn-f-${i}`} className="p-0.5 border-r"><input type="number" className="w-7 text-center rounded border border-red-200 font-bold text-red-500 bg-white" value={pn || ''} onChange={(e) => updateField('penalty', i, e.target.value)} /></td>
-                                            ))}
-                                            <td className="border-r bg-emerald-50/50 font-bold text-red-500">{editableData.penalty.slice(0, 9).reduce((a,b)=>a+(Number(b)||0),0) || ''}</td>
-                                            {editableData.penalty.slice(9, 18).map((pn, i) => (
-                                                <td key={`pn-b-${i}`} className="p-0.5 border-r"><input type="number" className="w-7 text-center rounded border border-red-200 font-bold text-red-500 bg-white" value={pn || ''} onChange={(e) => updateField('penalty', i + 9, e.target.value)} /></td>
-                                            ))}
-                                            <td className="border-r bg-blue-50/50 font-bold text-red-500">{editableData.penalty.slice(9, 18).reduce((a,b)=>a+(Number(b)||0),0) || ''}</td>
-                                            <td className="bg-indigo-50/50 font-black text-red-600">{editableData.penalty.reduce((a,b)=>a+(Number(b)||0),0) || ''}</td>
-                                        </tr>
-
-                                        <tr className="hover:bg-gray-50/50">
-                                            <td className="p-1.5 border-r font-bold text-yellow-600 text-left pl-3 bg-gray-50">Bunker</td>
-                                            {editableData.sand.slice(0, 9).map((bk, i) => (
-                                                <td key={`bk-f-${i}`} className="p-0.5 border-r"><input type="number" className="w-7 text-center rounded border border-yellow-200 font-bold text-yellow-600 bg-white" value={bk || ''} onChange={(e) => updateField('sand', i, e.target.value)} /></td>
-                                            ))}
-                                            <td className="border-r bg-emerald-50/50 font-bold text-yellow-600">{editableData.sand.slice(0, 9).reduce((a,b)=>a+(Number(b)||0),0) || ''}</td>
-                                            {editableData.sand.slice(9, 18).map((bk, i) => (
-                                                <td key={`bk-b-${i}`} className="p-0.5 border-r"><input type="number" className="w-7 text-center rounded border border-yellow-200 font-bold text-yellow-600 bg-white" value={bk || ''} onChange={(e) => updateField('sand', i + 9, e.target.value)} /></td>
-                                            ))}
-                                            <td className="border-r bg-blue-50/50 font-bold text-yellow-600">{editableData.sand.slice(9, 18).reduce((a,b)=>a+(Number(b)||0),0) || ''}</td>
-                                            <td className="bg-indigo-50/50 font-black text-yellow-600">{editableData.sand.reduce((a,b)=>a+(Number(b)||0),0) || ''}</td>
-                                        </tr>
-
-                                        {editableData.partners.map((partner, pIdx) => (
-                                            <tr key={`partner-${pIdx}`} className="hover:bg-gray-50/50 border-t border-gray-200">
-                                                <td className="p-1 border-r text-left pl-2 bg-gray-50">
-                                                    <input type="text" className="w-20 px-1 py-0.5 text-xs font-bold text-gray-700 rounded border border-gray-200 bg-white" value={partner.name} onChange={(e) => updateField('partnerName', pIdx, e.target.value)} />
-                                                </td>
-                                                {partner.score.slice(0, 9).map((sc, i) => (
-                                                    <td key={`ptn-${pIdx}-f-${i}`} className="p-0.5 border-r"><input type="number" className="w-7 text-center rounded border border-gray-200 font-bold text-gray-700 bg-white" value={sc} onChange={(e) => updateField('partnerScore', i, e.target.value, pIdx)} /></td>
-                                                ))}
-                                                <td className="border-r bg-emerald-50/50 font-bold text-gray-700">
-                                                    {editableData.par.slice(0, 9).reduce((acc, p, idx) => acc + p + (Number(partner.score[idx]) || 0), 0)}
-                                                </td>
-                                                {partner.score.slice(9, 18).map((sc, i) => (
-                                                    <td key={`ptn-${pIdx}-b-${i}`} className="p-0.5 border-r"><input type="number" className="w-7 text-center rounded border border-gray-200 font-bold text-gray-700 bg-white" value={sc} onChange={(e) => updateField('partnerScore', i + 9, e.target.value, pIdx)} /></td>
-                                                ))}
-                                                <td className="border-r bg-blue-50/50 font-bold text-gray-700">
-                                                    {editableData.par.slice(9, 18).reduce((acc, p, idx) => acc + p + (Number(partner.score[idx + 9]) || 0), 0)}
-                                                </td>
-                                                <td className="bg-indigo-50/50 font-black text-gray-800">
-                                                    {editableData.par.reduce((acc, p, idx) => acc + p + (Number(partner.score[idx]) || 0), 0)}
-                                                </td>
-                                            </tr>
-                                        ))}
-                                    </tbody>
-                                </table>
-                            </div>
-
-                            {/* 하단 단축 버튼들 */}
-                            <div className="flex flex-col sm:flex-row gap-3 pt-2">
-                                <button 
-                                    onClick={handleSyncToGoogleSheets} 
-                                    disabled={isSaving}
-                                    className="flex-1 py-3.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl font-black text-sm flex items-center justify-center gap-2 shadow-md transition-all"
-                                >
-                                    {isSaving ? <LucideIcon name="loader-2" className="w-4 h-4 animate-spin" /> : <LucideIcon name="cloud-upload" className="w-4 h-4" />}
-                                    구글 시트에 즉시 자동 기록하기
-                                </button>
-                                <a 
-                                    href="[https://docs.google.com/spreadsheets/d/1fH5iCTpsHwJbHG7Qh7Rot5zNfqB05DYfKbu2gStFD7g/edit](https://docs.google.com/spreadsheets/d/1fH5iCTpsHwJbHG7Qh7Rot5zNfqB05DYfKbu2gStFD7g/edit)" 
-                                    target="_blank" 
-                                    rel="noopener noreferrer"
-                                    className="py-3.5 px-6 rounded-xl font-bold text-sm text-gray-600 bg-gray-100 hover:bg-gray-200 flex justify-center items-center gap-2 transition-all border border-gray-200"
-                                >
-                                    <LucideIcon name="external-link" className="w-4 h-4" />
-                                    내 구글 시트 확인
-                                </a>
-                            </div>
+                            )}
                         </div>
-                    )}
+                    </div>
                 </div>
             );
         };
 
         const App = () => {
             const [data, setData] = useState([]);
-            // 첫 화면이 대시보드가 되도록 설정
             const [activeTab, setActiveTab] = useState('dashboard');
             const [isMobile, setIsMobile] = useState(window.innerWidth < 768);
             const [isSidebarOpen, setIsSidebarOpen] = useState(window.innerWidth >= 768);
@@ -576,46 +371,35 @@
                 if (window.innerWidth < 768) setIsSidebarOpen(false);
             };
 
-            const fetchGoogleSheetData = async () => {
-                try {
-                    setIsLoading(true);
-                    const sheetId = '1fH5iCTpsHwJbHG7Qh7Rot5zNfqB05DYfKbu2gStFD7g';
-                    const ts = new Date().getTime();
-                    
-                    // 'Raw' 탭에서 데이터를 정확히 가져오도록 지정 (CORS 우회 gviz 활용)
-                    const fetchUrl = `[https://docs.google.com/spreadsheets/d/$](https://docs.google.com/spreadsheets/d/$){sheetId}/gviz/tq?tqx=out:csv&sheet=Raw&nocache=${ts}`;
-
-                    const response = await fetch(fetchUrl);
-                    if (!response.ok) throw new Error(`HTTP Error ${response.status}`);
-                    
-                    const arrayBuffer = await response.arrayBuffer();
-                    
-                    const textCheck = new TextDecoder().decode(arrayBuffer.slice(0, 100));
-                    if (textCheck.includes('<!DOCTYPE html>')) {
-                        throw new Error("구글 시트가 비공개 상태입니다. '링크가 있는 모든 사용자 보기' 권한으로 변경해주세요.");
-                    }
-
-                    const wb = XLSX.read(arrayBuffer, { type: 'array' });
-                    const ws = wb.Sheets[wb.SheetNames[0]]; 
-                    const rawArray = XLSX.utils.sheet_to_json(ws, { header: 1 });
-                    
-                    if (rawArray && rawArray.length > 0) {
-                        processRawArray(rawArray);
-                    } else {
-                        throw new Error("데이터가 비어있습니다. 'Raw' 시트를 확인해주세요.");
-                    }
-
-                } catch (error) {
-                    console.error("[Fetch Error]", error);
-                    setDebugInfo({ 
-                        headers: ["자동 데이터 불러오기 실패"], 
-                        firstRow: [error.message, "엑셀 파일을 수동으로 업로드해주세요."] 
-                    });
-                    setIsLoading(false);
-                }
-            };
-
             useEffect(() => {
+                const fetchGoogleSheetData = async () => {
+                    try {
+                        const sheetId = '1fH5iCTpsHwJbHG7Qh7Rot5zNfqB05DYfKbu2gStFD7g';
+                        const ts = new Date().getTime();
+                        const exportUrl = `https://docs.google.com/spreadsheets/d/${sheetId}/export?format=xlsx&nocache=${ts}`;
+
+                        const response = await fetch(exportUrl);
+                        if (!response.ok) throw new Error(`HTTP Error ${response.status}`);
+                        
+                        const arrayBuffer = await response.arrayBuffer();
+                        const wb = XLSX.read(arrayBuffer, {type: 'array', cellDates: true});
+                        const wsname = wb.SheetNames.includes('Raw') ? 'Raw' : wb.SheetNames[0];
+                        const ws = wb.Sheets[wsname];
+                        const rawArray = XLSX.utils.sheet_to_json(ws, { header: 1 });
+                        
+                        if (rawArray && rawArray.length > 0) processRawArray(rawArray);
+                        else setIsLoading(false);
+
+                    } catch (error) {
+                        console.error("[Fetch Error]", error);
+                        setDebugInfo({ 
+                            headers: ["초기 버전 연결 실패"], 
+                            firstRow: [error.message, "수동 파일 업로드를 이용해주세요."] 
+                        });
+                        setIsLoading(false);
+                    }
+                };
+
                 fetchGoogleSheetData();
             }, []);
             
@@ -903,12 +687,7 @@
                         </header>
 
                         <main className="flex-1 overflow-y-auto p-4 md:p-6 lg:p-8 custom-scrollbar">
-                            {/* 1. AI 스코어 변환 탭은 데이터 유무와 상관없이 항상 렌더링되도록 분리 */}
-                            {activeTab === 'ai-upload' ? (
-                                <AIVisionUploadTab onSaveSuccess={fetchGoogleSheetData} />
-                            ) : 
-                            /* 2. 다른 탭들은 데이터 로딩 상태 체크 */
-                            isLoading ? (
+                            {isLoading ? (
                                 <div className="flex flex-col items-center justify-center h-full animate-pulse">
                                     <LucideIcon name="loader-2" className="w-10 h-10 text-emerald-500 animate-spin mb-4" />
                                     <p className="text-gray-500 font-medium">데이터를 불러오는 중입니다...</p>
@@ -947,6 +726,7 @@
                                     {activeTab === 'report' && <ReportTab data={data} />}
                                     {activeTab === 'course' && <CourseTab data={data} />}
                                     {activeTab === 'partner' && <PartnerTab data={data} />}
+                                    {activeTab === 'ai-upload' && <AIVisionUploadTab />}
                                 </>
                             )}
                         </main>
@@ -955,8 +735,8 @@
             );
         };
 
-        const PlusIcon = () => <svg xmlns="[http://www.w3.org/2000/svg](http://www.w3.org/2000/svg)" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>;
-        const MinusIcon = () => <svg xmlns="[http://www.w3.org/2000/svg](http://www.w3.org/2000/svg)" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="5" y1="12" x2="19" y2="12"></line></svg>;
+        const PlusIcon = () => <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>;
+        const MinusIcon = () => <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="5" y1="12" x2="19" y2="12"></line></svg>;
 
         const DashboardTab = ({ data }) => {
             const [viewMode, setViewMode] = useState('year'); 
@@ -2224,6 +2004,295 @@
                     <p className="text-xl font-black leading-none">
                         {value} <span className="text-[10px] font-medium opacity-60 ml-0.5">{suffix}</span>
                     </p>
+                </div>
+            );
+        };
+
+        const ReportTab = ({ data }) => {
+            const years = useMemo(() => {
+                return [...new Set(data.map(d => d.year))].filter(y => y && !isNaN(y) && parseInt(y) > 2000).sort((a,b)=> b-a);
+            }, [data]);
+
+            const [selectedYear, setSelectedYear] = useState(years.length > 0 ? years[0] : 'all');
+
+            const reportData = useMemo(() => {
+                const filtered = selectedYear === 'all' ? data : data.filter(d => d.year === selectedYear);
+                if (filtered.length === 0) return null;
+
+                let totals = { score: 0, putts: 0, fwHit: 0, fwCount: 0, gir: 0, girCount: 0, penalties: 0, bunkers: 0, ud: 0, udCount: 0, par3Score: 0, par3Par: 0, par4Score: 0, par4Par: 0, par5Score: 0, par5Par: 0 };
+                let bestScore = 999;
+                let worstScore = 0;
+                let subPars = 0, pars = 0, bogeys = 0, doublePlus = 0;
+
+                filtered.forEach(d => {
+                    totals.score += d.score;
+                    if (d.score < bestScore) bestScore = d.score;
+                    if (d.score > worstScore) worstScore = d.score;
+                    
+                    if (d.putts > 0) totals.putts += d.putts;
+                    if (d.fwHit > 0) { totals.fwHit += d.fwHit; totals.fwCount++; }
+                    if (d.gir > 0) { totals.gir += d.gir; totals.girCount++; }
+                    if (d.ud > 0) { totals.ud += d.ud; totals.udCount++; }
+                    totals.penalties += d.penalties;
+                    totals.bunkers += d.bunkerShots;
+
+                    d.holes.forEach(h => {
+                        if (h.par === 0) return;
+                        if (h.par === 3) { totals.par3Score += h.score; totals.par3Par += h.par; }
+                        else if (h.par === 4) { totals.par4Score += h.score; totals.par4Par += h.par; }
+                        else if (h.par === 5) { totals.par5Score += h.score; totals.par5Par += h.par; }
+
+                        const diff = h.score - h.par;
+                        if (diff < 0) subPars++;
+                        else if (diff === 0) pars++;
+                        else if (diff === 1) bogeys++;
+                        else if (diff >= 2) doublePlus++;
+                    });
+                });
+
+                const count = filtered.length;
+                const totalHoles = subPars + pars + bogeys + doublePlus || 1;
+
+                const stats = {
+                    rounds: count,
+                    avgScore: (totals.score / count).toFixed(1),
+                    bestScore: bestScore === 999 ? '-' : bestScore,
+                    worstScore: worstScore === 0 ? '-' : worstScore,
+                    avgPutts: (totals.putts / count).toFixed(1),
+                    fwRate: totals.fwCount ? Math.round(totals.fwHit / totals.fwCount) : 0,
+                    girRate: totals.girCount ? Math.round(totals.gir / totals.girCount) : 0,
+                    udRate: totals.udCount ? Math.round(totals.ud / totals.udCount) : 0,
+                    avgPenalty: (totals.penalties / count).toFixed(1),
+                    avgBunker: (totals.bunkers / count).toFixed(1),
+                    par3Avg: totals.par3Par ? '+' + ((totals.par3Score - totals.par3Par) / (totals.par3Par/3)).toFixed(1) : '-',
+                    par4Avg: totals.par4Par ? '+' + ((totals.par4Score - totals.par4Par) / (totals.par4Par/4)).toFixed(1) : '-',
+                    par5Avg: totals.par5Par ? '+' + ((totals.par5Score - totals.par5Par) / (totals.par5Par/5)).toFixed(1) : '-',
+                    parRate: Math.round(((subPars + pars) / totalHoles) * 100),
+                    bogeyRate: Math.round((bogeys / totalHoles) * 100),
+                    doubleRate: Math.round((doublePlus / totalHoles) * 100)
+                };
+
+                let strengths = [];
+                let weaknesses = [];
+                let strategies = [];
+
+                if (stats.fwRate >= 55) strengths.push({ title: "안정적인 티샷", desc: `페어웨이 안착률이 ${stats.fwRate}%로 평균 이상입니다. 세컨드 샷을 유리한 위치에서 시작하여 스코어 방어에 큰 기여를 하고 있습니다.` });
+                if (stats.girRate >= 40) strengths.push({ title: "날카로운 아이언", desc: `그린 적중률(GIR) ${stats.girRate}%로 훌륭한 샷 밸런스를 유지하고 있습니다. 버디와 파 찬스를 꾸준히 만들어냅니다.` });
+                if (parseFloat(stats.avgPutts) <= 35) strengths.push({ title: "정교한 퍼팅", desc: `평균 퍼트 수가 ${stats.avgPutts}개로 그린 위에서의 집중력이 뛰어납니다. 쓰리 퍼트를 효과적으로 억제하고 있습니다.` });
+                if (parseFloat(stats.avgPenalty) <= 1.0) strengths.push({ title: "스마트한 코스 매니지먼트", desc: `라운드 당 평균 벌타가 ${stats.avgPenalty}개 수준으로, 리스크를 잘 관리하는 영리한 플레이를 보여줍니다.` });
+                if (stats.udRate >= 25) strengths.push({ title: "뛰어난 위기 관리 (U/D)", desc: `그린을 놓쳤을 때 파로 막아내는 U/D 성공률이 ${stats.udRate}%로 매우 우수합니다. 어프로치와 숏게임이 강력한 무기입니다.` });
+
+                if (stats.fwRate < 50 && totals.fwCount > 0) weaknesses.push({ title: "티샷 방향성 기복", desc: `페어웨이 안착률(${stats.fwRate}%)이 다소 아쉽습니다. 트러블 상황에서의 세컨드 샷 비중이 높아 스코어 손실이 누적됩니다.` });
+                if (stats.girRate < 35 && totals.girCount > 0) weaknesses.push({ title: "아이언 정확도 및 세컨드 샷 불안", desc: `그린 적중률(${stats.girRate}%)이 낮아 숏게임(어프로치)에 대한 의존도와 압박감이 매우 높습니다.` });
+                if (parseFloat(stats.avgPutts) >= 36) weaknesses.push({ title: "퍼팅 거리감 및 숏퍼트 미스", desc: `평균 퍼트 수(${stats.avgPutts}개)가 많습니다. 첫 퍼트의 거리감 부족이 쓰리 퍼트로 이어지거나 1~2m 숏퍼트 미스가 잦은 것으로 보입니다.` });
+                if (parseFloat(stats.avgPenalty) >= 1.5) weaknesses.push({ title: "코스 매니지먼트 및 페널티 누적", desc: `평균 벌타가 ${stats.avgPenalty}개로 스코어 상승의 주된 원인입니다. 공격적인 에이밍이나 무리한 세컨드 샷 시도가 원인일 수 있습니다.` });
+                if (stats.udRate < 20 && totals.udCount > 0) weaknesses.push({ title: "그린 주변 숏게임(U/D) 불안", desc: `U/D 성공률(${stats.udRate}%)이 낮습니다. 그린 주변에서 파 세이브를 하지 못해 보기가 더블 보기로 무너지는 흐름이 나옵니다.` });
+                if (parseFloat(stats.avgBunker) >= 3.0) weaknesses.push({ title: "벙커 기피 현상 및 탈출 실패", desc: `평균 벙커샷이 ${stats.avgBunker}회로 잦습니다. 벙커에 자주 빠지거나 한 번에 탈출하지 못해 타수를 잃고 있습니다.` });
+
+                if (strengths.length === 0) strengths.push({ title: "무난한 플레이 흐름", desc: "전체적으로 크게 흔들림 없이 안정적인 템포를 유지하며 라운딩을 소화하고 있습니다." });
+                if (weaknesses.length === 0) weaknesses.push({ title: "숏게임 집중력 저하", desc: "전반적인 샷 지표는 준수하나, 스코어를 극적으로 줄이기 위해서는 30m 이내 어프로치와 퍼팅 퀄리티를 한 단계 높여야 합니다." });
+
+                if (stats.girRate < 35) strategies.push("100~130m 이내의 숏아이언/웨지 컨트롤 샷 연습량을 늘려 그린 적중률(GIR)을 방어하세요.");
+                if (parseFloat(stats.avgPutts) >= 36) strategies.push("라운드 전 연습그린에서 반드시 10~15보 롱퍼트 거리감 맞추기와 1.5m 숏퍼트 집중력 연습에 15분 이상 투자하세요.");
+                if (stats.udRate < 20 && totals.udCount > 0) strategies.push("그린 주변 10~20m 어프로치 시, 공을 무리하게 띄우기보다는 런닝 어프로치(피치앤런) 비율을 높여 홀에 붙일 확률을 높이세요.");
+                if (stats.fwRate < 50) strategies.push("드라이버 비거리에 대한 욕심을 버리고, 80%의 스윙 크기로 페어웨이를 지키는 '컨트롤 티샷' 전략을 실전에서 테스트해 보세요.");
+                if (parseFloat(stats.avgPenalty) >= 1.5) strategies.push("위험 구역(OB/해저드)이 있는 홀에서는 무조건 넓은 쪽이나 안전한 벙커 방향을 에이밍하는 보수적인 코스 매니지먼트를 적용하세요.");
+                if (parseFloat(stats.avgBunker) >= 3.0) strategies.push("세컨드 샷 에이밍 시 핀을 직접 노리기보다 벙커를 피하는 안전한 구역(그린 중앙)을 최우선 타겟으로 삼으세요.");
+                if (strategies.length < 3) strategies.push("파3 홀에서의 티샷 정확도를 높이고, 파4 홀에서는 무리한 2온보다는 안전한 3온 1퍼트 전략을 적절히 섞어 운영해 보세요.");
+                
+                const radarData = [
+                    { subject: '정확도(FW)', A: stats.fwRate || 0, fullMark: 100 },
+                    { subject: '아이언(GIR)', A: stats.girRate || 0, fullMark: 100 },
+                    { subject: '스코어', A: Math.max(0, 100 - (parseFloat(stats.avgScore) - 72) * 2), fullMark: 100 }, 
+                    { subject: '안정성(Penalty)', A: Math.max(0, 100 - (parseFloat(stats.avgPenalty) * 15)), fullMark: 100 },
+                    { subject: '퍼팅', A: Math.max(0, 100 - (parseFloat(stats.avgPutts) - 28) * 3), fullMark: 100 }, 
+                    { subject: '위기관리(U/D)', A: stats.udRate || 0, fullMark: 100 }
+                ];
+
+                return { stats, strengths, weaknesses, strategies, radarData };
+            }, [data, selectedYear]);
+
+            if (!reportData) return <div className="text-center p-10 text-gray-500">해당 연도의 데이터가 없습니다.</div>;
+
+            return (
+                <div className="space-y-6 animate-fade-in pb-10 max-w-6xl mx-auto">
+                    <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 bg-white p-5 rounded-2xl shadow-sm border border-gray-100">
+                        <div>
+                            <h2 className="text-xl font-black text-gray-800 flex items-center gap-2">
+                                <LucideIcon name="clipboard-check" className="w-6 h-6 text-emerald-500" />
+                                {selectedYear === 'all' ? '전체 기간' : `${selectedYear}년`} 골프 종합 분석 보고서
+                            </h2>
+                            <p className="text-xs text-gray-500 mt-1">AI가 고객님의 데이터를 다각도로 분석하여 작성한 리포트입니다.</p>
+                        </div>
+                        <select 
+                            className="border border-gray-200 rounded-xl px-4 py-2 font-bold text-sm text-gray-800 focus:ring-emerald-500 focus:border-emerald-500 bg-gray-50 hover:bg-white transition-colors cursor-pointer"
+                            value={selectedYear}
+                            onChange={(e) => setSelectedYear(e.target.value)}
+                        >
+                            <option value="all">전체 연도</option>
+                            {years.map(y => <option key={y} value={y}>{y}년</option>)}
+                        </select>
+                    </div>
+
+                    <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                        <div className="bg-gradient-to-br from-slate-800 to-slate-900 rounded-2xl p-5 text-white shadow-md relative overflow-hidden">
+                            <div className="absolute right-[-10px] top-[-10px] opacity-10">
+                                <LucideIcon name="flag" className="w-24 h-24" />
+                            </div>
+                            <p className="text-slate-400 text-xs font-bold uppercase tracking-wider mb-1 relative z-10">총 라운드</p>
+                            <p className="text-3xl font-black relative z-10">{reportData.stats.rounds}<span className="text-sm font-normal text-slate-300 ml-1">회</span></p>
+                        </div>
+                        <div className="bg-gradient-to-br from-blue-500 to-blue-700 rounded-2xl p-5 text-white shadow-md relative overflow-hidden">
+                            <div className="absolute right-[-10px] top-[-10px] opacity-10">
+                                <LucideIcon name="target" className="w-24 h-24" />
+                            </div>
+                            <p className="text-blue-200 text-xs font-bold uppercase tracking-wider mb-1 relative z-10">평균 스코어</p>
+                            <p className="text-3xl font-black relative z-10">{reportData.stats.avgScore}<span className="text-sm font-normal text-blue-200 ml-1">타</span></p>
+                        </div>
+                        <div className="bg-gradient-to-br from-emerald-500 to-teal-600 rounded-2xl p-5 text-white shadow-md relative overflow-hidden">
+                            <div className="absolute right-[-10px] top-[-10px] opacity-10">
+                                <LucideIcon name="award" className="w-24 h-24" />
+                            </div>
+                            <p className="text-emerald-200 text-xs font-bold uppercase tracking-wider mb-1 relative z-10">시즌 베스트</p>
+                            <p className="text-3xl font-black relative z-10">{reportData.stats.bestScore}<span className="text-sm font-normal text-emerald-200 ml-1">타</span></p>
+                        </div>
+                        <div className="bg-gradient-to-br from-orange-400 to-red-500 rounded-2xl p-5 text-white shadow-md relative overflow-hidden">
+                            <div className="absolute right-[-10px] top-[-10px] opacity-10">
+                                <LucideIcon name="trending-down" className="w-24 h-24" />
+                            </div>
+                            <p className="text-orange-200 text-xs font-bold uppercase tracking-wider mb-1 relative z-10">평균 퍼트수</p>
+                            <p className="text-3xl font-black relative z-10">{reportData.stats.avgPutts}<span className="text-sm font-normal text-orange-200 ml-1">개</span></p>
+                        </div>
+                    </div>
+
+                    <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                        <div className="lg:col-span-1 space-y-6">
+                            <div className="bg-white p-5 rounded-2xl shadow-sm border border-gray-100 flex flex-col items-center h-[320px]">
+                                <h3 className="w-full text-sm font-bold text-gray-800 mb-2 flex items-center gap-2">
+                                    <LucideIcon name="hexagon" className="w-4 h-4 text-indigo-500" />
+                                    플레이 밸런스 분석
+                                </h3>
+                                <ResponsiveContainer width="100%" height="100%">
+                                    <RadarChart cx="50%" cy="50%" outerRadius="70%" data={reportData.radarData}>
+                                        <PolarGrid stroke="#e2e8f0" />
+                                        <PolarAngleAxis dataKey="subject" tick={{ fill: '#64748b', fontSize: 11, fontWeight: 'bold' }} />
+                                        <PolarRadiusAxis angle={30} domain={[0, 100]} tick={false} axisLine={false} />
+                                        <Radar name="능력치" dataKey="A" stroke="#10b981" fill="#34d399" fillOpacity={0.5} />
+                                    </RadarChart>
+                                </ResponsiveContainer>
+                            </div>
+
+                            <div className="bg-white p-5 rounded-2xl shadow-sm border border-gray-100">
+                                <h3 className="text-sm font-bold text-gray-800 mb-4 flex items-center gap-2">
+                                    <LucideIcon name="pie-chart" className="w-4 h-4 text-blue-500" />
+                                    홀별 스코어 분포도
+                                </h3>
+                                <div className="space-y-3">
+                                    <div>
+                                        <div className="flex justify-between text-[11px] font-bold mb-1">
+                                            <span className="text-emerald-600">파 이하 (Par or Better)</span>
+                                            <span className="text-emerald-700">{reportData.stats.parRate}%</span>
+                                        </div>
+                                        <div className="w-full bg-gray-100 rounded-full h-2">
+                                            <div className="bg-emerald-500 h-2 rounded-full" style={{ width: `${reportData.stats.parRate}%` }}></div>
+                                        </div>
+                                    </div>
+                                    <div>
+                                        <div className="flex justify-between text-[11px] font-bold mb-1">
+                                            <span className="text-blue-600">보기 (Bogey)</span>
+                                            <span className="text-blue-700">{reportData.stats.bogeyRate}%</span>
+                                        </div>
+                                        <div className="w-full bg-gray-100 rounded-full h-2">
+                                            <div className="bg-blue-500 h-2 rounded-full" style={{ width: `${reportData.stats.bogeyRate}%` }}></div>
+                                        </div>
+                                    </div>
+                                    <div>
+                                        <div className="flex justify-between text-[11px] font-bold mb-1">
+                                            <span className="text-red-500">더블 보기 이상 (Double+)</span>
+                                            <span className="text-red-600">{reportData.stats.doubleRate}%</span>
+                                        </div>
+                                        <div className="w-full bg-gray-100 rounded-full h-2">
+                                            <div className="bg-red-500 h-2 rounded-full" style={{ width: `${reportData.stats.doubleRate}%` }}></div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div className="lg:col-span-2 space-y-6">
+                            
+                            <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100">
+                                <h3 className="text-base font-black text-emerald-600 mb-4 flex items-center gap-2 border-b border-emerald-100 pb-3">
+                                    <LucideIcon name="thumbs-up" className="w-5 h-5" />
+                                    주요 성과 및 강점
+                                </h3>
+                                <div className="space-y-4">
+                                    {reportData.strengths.map((item, idx) => (
+                                        <div key={idx} className="flex gap-3 items-start">
+                                            <div className="mt-0.5 bg-emerald-100 p-1.5 rounded-lg shrink-0">
+                                                <LucideIcon name="check" className="w-4 h-4 text-emerald-600" />
+                                            </div>
+                                            <div>
+                                                <h4 className="text-sm font-bold text-gray-800">{item.title}</h4>
+                                                <p className="text-[13px] text-gray-600 mt-1 leading-relaxed">{item.desc}</p>
+                                            </div>
+                                        </div>
+                                    ))}
+                                </div>
+                            </div>
+
+                            <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100">
+                                <h3 className="text-base font-black text-red-500 mb-4 flex items-center gap-2 border-b border-red-100 pb-3">
+                                    <LucideIcon name="alert-triangle" className="w-5 h-5" />
+                                    취약점 및 개선 분석
+                                </h3>
+                                <div className="space-y-4">
+                                    {reportData.weaknesses.map((item, idx) => (
+                                        <div key={idx} className="flex gap-3 items-start">
+                                            <div className="mt-0.5 bg-red-100 p-1.5 rounded-lg shrink-0">
+                                                <LucideIcon name="trending-down" className="w-4 h-4 text-red-600" />
+                                            </div>
+                                            <div>
+                                                <h4 className="text-sm font-bold text-gray-800">{item.title}</h4>
+                                                <p className="text-[13px] text-gray-600 mt-1 leading-relaxed">{item.desc}</p>
+                                            </div>
+                                        </div>
+                                    ))}
+                                </div>
+                            </div>
+
+                            <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100">
+                                <h3 className="text-base font-black text-indigo-600 mb-4 flex items-center gap-2 border-b border-indigo-100 pb-3">
+                                    <LucideIcon name="lightbulb" className="w-5 h-5" />
+                                    핵심 훈련 전략 및 조언
+                                </h3>
+                                <ul className="space-y-3">
+                                    {reportData.strategies.map((strategy, idx) => (
+                                        <li key={idx} className="flex gap-3 items-start bg-indigo-50/50 p-3 rounded-xl border border-indigo-50">
+                                            <span className="text-indigo-500 font-black text-sm">{idx + 1}.</span>
+                                            <p className="text-[13px] text-gray-700 leading-relaxed font-medium">{strategy}</p>
+                                        </li>
+                                    ))}
+                                </ul>
+                            </div>
+
+                            <div className="grid grid-cols-3 gap-4">
+                                <div className="bg-gray-50 p-4 rounded-xl border border-gray-100 text-center">
+                                    <p className="text-[11px] font-bold text-gray-500 uppercase tracking-wider mb-1">Par 3 평균 오버파</p>
+                                    <p className="text-lg font-black text-gray-800">{reportData.stats.par3Avg}</p>
+                                </div>
+                                <div className="bg-gray-50 p-4 rounded-xl border border-gray-100 text-center">
+                                    <p className="text-[11px] font-bold text-gray-500 uppercase tracking-wider mb-1">Par 4 평균 오버파</p>
+                                    <p className="text-lg font-black text-gray-800">{reportData.stats.par4Avg}</p>
+                                </div>
+                                <div className="bg-gray-50 p-4 rounded-xl border border-gray-100 text-center">
+                                    <p className="text-[11px] font-bold text-gray-500 uppercase tracking-wider mb-1">Par 5 평균 오버파</p>
+                                    <p className="text-lg font-black text-gray-800">{reportData.stats.par5Avg}</p>
+                                </div>
+                            </div>
+
+                        </div>
+                    </div>
                 </div>
             );
         };
