@@ -62,10 +62,10 @@
         };
 
         const AIVisionUploadTab = () => {
-            // ↓↓↓ 2. 배포된 구글 앱스 스크립트 웹 앱 URL을 여기에 넣으세요 ↓↓↓
+            // ↓↓↓ 여기에 현재 사용 중이신 GAS 웹 앱 URL을 다시 넣어주세요 ↓↓↓
             const GAS_WEB_APP_URL = "https://script.google.com/macros/s/AKfycbxT2TUu1ht4QodfwHtczBonZygQ4QicYNVeaKPAe8FODRowxBFPMrjSD5Z3Laj3IQtWVQ/exec";
             // ↑↑↑================================================================↑↑↑
-        
+
             const [images, setImages] = useState({ summary: null, details: null });
             const [previews, setPreviews] = useState({ summary: null, details: null });
             
@@ -75,9 +75,8 @@
             const [resultMsg, setResultMsg] = useState("");
             const [errorMsg, setErrorMsg] = useState("");
             
-            // AI 분석 결과를 담을 상태 (검수용 데이터)
             const [analyzedData, setAnalyzedData] = useState(null);
-        
+
             const handleFileChange = (type, e) => {
                 const file = e.target.files[0];
                 if (file) {
@@ -87,15 +86,14 @@
                     reader.readAsDataURL(file);
                 }
             };
-        
+
             const fileToBase64 = (file) => new Promise((resolve, reject) => {
                 const reader = new FileReader();
                 reader.readAsDataURL(file);
                 reader.onload = () => resolve(reader.result.split(',')[1]);
                 reader.onerror = error => reject(error);
             });
-        
-            // 1. GAS에 AI 분석 요청
+
             const handleAnalyze = async () => {
                 if (!images.summary) {
                     setErrorMsg("스코어카드 요약 사진은 필수입니다.");
@@ -105,31 +103,29 @@
                 setResultMsg("AI가 이미지를 판독하고 있습니다... (약 10초 소요)");
                 setErrorMsg("");
                 setAnalyzedData(null);
-        
+
                 try {
                     const base64Summary = await fileToBase64(images.summary);
-                    let payloadImages = { 
-                        summary: { type: images.summary.type, base64: base64Summary } 
-                    };
-        
+                    let payloadImages = { summary: { type: images.summary.type, base64: base64Summary } };
+
                     if (images.details) {
                         const base64Details = await fileToBase64(images.details);
                         payloadImages.details = { type: images.details.type, base64: base64Details };
                     }
-        
+
                     const response = await fetch(GAS_WEB_APP_URL, {
                         method: "POST",
                         redirect: "follow",
-                        headers: {
-                            "Content-Type": "text/plain;charset=utf-8",
-                        },
+                        headers: { "Content-Type": "text/plain;charset=utf-8" },
                         body: JSON.stringify({ action: "analyze", images: payloadImages })
                     });
-        
+
                     const result = await response.json();
-        
+
                     if (result.success) {
-                        setAnalyzedData(result.data); // 결과 데이터를 State에 저장하여 테이블 렌더링
+                        // AI가 파트너 배열을 안 보냈을 경우를 대비한 방어 로직
+                        if (!result.data.partners) result.data.partners = [];
+                        setAnalyzedData(result.data); 
                         setResultMsg("✅ 분석 완료! 아래 테이블을 검수 및 수정 후 저장해주세요.");
                     } else {
                         throw new Error(result.error);
@@ -142,42 +138,57 @@
                     setIsAnalyzing(false);
                 }
             };
-        
-            // 실시간 수정 핸들러 (배열 데이터)
+
             const handleArrayChange = (key, index, value) => {
                 setAnalyzedData(prev => {
-                    const newArr = [...prev[key]];
-                    // 숫자가 들어가야 하는 항목들 처리
-                    if (['par', 'myScore', 'putts', 'penalty', 'sand'].includes(key)) {
-                        newArr[index] = value === "" ? "" : Number(value);
-                    } else {
-                        newArr[index] = value;
-                    }
+                    const newArr = [...(prev[key] || Array(18).fill(""))];
+                    newArr[index] = value;
                     return { ...prev, [key]: newArr };
                 });
             };
-        
-            // 2. 구글 시트로 최종 저장 요청
+
+            // 동반자 이름 및 점수 수정 핸들러
+            const handlePartnerChange = (pIdx, key, index, value) => {
+                setAnalyzedData(prev => {
+                    const newPartners = [...(prev.partners || [])];
+                    if (!newPartners[pIdx]) newPartners[pIdx] = { name: "", score: Array(18).fill("") };
+                    
+                    if (key === 'name') {
+                        newPartners[pIdx].name = value;
+                    } else {
+                        const newScore = [...(newPartners[pIdx].score || Array(18).fill(""))];
+                        newScore[index] = value;
+                        newPartners[pIdx].score = newScore;
+                    }
+                    return { ...prev, partners: newPartners };
+                });
+            };
+
+            // 파트너 수동 추가 핸들러 (검수 시 동반자가 누락됐을 때 직접 추가하는 용도)
+            const addPartnerRow = () => {
+                setAnalyzedData(prev => {
+                    const newPartners = [...(prev.partners || []), { name: "", score: Array(18).fill("") }];
+                    return { ...prev, partners: newPartners };
+                });
+            };
+
             const handleSaveToSheet = async () => {
                 setIsSaving(true);
                 setResultMsg("구글 시트에 데이터를 저장하고 있습니다...");
                 setErrorMsg("");
-        
+
                 try {
                     const response = await fetch(GAS_WEB_APP_URL, {
                         method: "POST",
                         redirect: "follow",
-                        headers: {
-                            "Content-Type": "text/plain;charset=utf-8",
-                        },
+                        headers: { "Content-Type": "text/plain;charset=utf-8" },
                         body: JSON.stringify({ action: "save", data: analyzedData })
                     });
-        
+
                     const result = await response.json();
-        
+
                     if (result.success) {
                         alert(`성공적으로 저장되었습니다!\n${result.message}`);
-                        // 저장 성공 시 앱을 새로고침하여 최신 구글 시트 데이터를 다시 로드함
                         window.location.reload(); 
                     } else {
                         throw new Error(result.error);
@@ -189,11 +200,10 @@
                     setIsSaving(false);
                 }
             };
-        
+
             return (
                 <div className="animate-fade-in p-2 md:p-8 max-w-6xl mx-auto pb-20">
                     <div className="bg-white rounded-3xl shadow-sm border border-gray-100 overflow-hidden relative">
-                        
                         <div className="bg-gradient-to-br from-emerald-600 to-teal-800 p-6 md:p-8 text-white relative overflow-hidden">
                             <div className="relative z-10">
                                 <h2 className="text-xl md:text-2xl font-black mb-2 flex items-center gap-2">
@@ -205,9 +215,8 @@
                                 </p>
                             </div>
                         </div>
-        
+
                         <div className="p-5 md:p-8 space-y-6">
-                            {/* 사진 업로드 영역 */}
                             <div className="grid grid-cols-1 md:grid-cols-2 gap-4 md:gap-6">
                                 <div className="border-2 border-dashed border-gray-200 bg-gray-50 rounded-2xl p-6 flex flex-col items-center justify-center text-center hover:border-emerald-400 hover:bg-emerald-50 transition-colors group cursor-pointer relative min-h-[220px]">
                                     <input type="file" accept="image/*" className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10" onChange={(e) => handleFileChange('summary', e)} />
@@ -220,7 +229,7 @@
                                         </>
                                     )}
                                 </div>
-        
+
                                 <div className="border-2 border-dashed border-gray-200 bg-gray-50 rounded-2xl p-6 flex flex-col items-center justify-center text-center hover:border-emerald-400 hover:bg-emerald-50 transition-colors group cursor-pointer relative min-h-[220px]">
                                     <input type="file" accept="image/*" className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10" onChange={(e) => handleFileChange('details', e)} />
                                     {previews.details ? (
@@ -233,8 +242,7 @@
                                     )}
                                 </div>
                             </div>
-        
-                            {/* 메시지 출력 영역 */}
+
                             {errorMsg && (
                                 <div className="p-4 bg-red-50 text-red-600 rounded-xl text-sm font-bold flex items-center gap-2 border border-red-100">
                                     <LucideIcon name="alert-circle" className="w-5 h-5 shrink-0" />
@@ -248,37 +256,47 @@
                                     {resultMsg}
                                 </div>
                             )}
-        
+
                             {!analyzedData && (
-                                <button 
-                                    onClick={handleAnalyze} 
-                                    disabled={isAnalyzing}
-                                    className={`w-full py-4 rounded-xl font-black text-lg flex justify-center items-center gap-2 transition-all shadow-md ${isAnalyzing ? 'bg-gray-200 text-gray-400 cursor-not-allowed' : 'bg-gray-900 hover:bg-gray-800 text-white hover:shadow-lg'}`}
-                                >
+                                <button onClick={handleAnalyze} disabled={isAnalyzing} className={`w-full py-4 rounded-xl font-black text-lg flex justify-center items-center gap-2 transition-all shadow-md ${isAnalyzing ? 'bg-gray-200 text-gray-400 cursor-not-allowed' : 'bg-gray-900 hover:bg-gray-800 text-white hover:shadow-lg'}`}>
                                     <LucideIcon name="bot" className="w-5 h-5" />
                                     AI 데이터 추출 시작
                                 </button>
                             )}
-        
-                            {/* 분석 완료 후 나타나는 실시간 검수 테이블 */}
+
                             {analyzedData && (
                                 <div className="mt-8 animate-fade-in space-y-4 border-t border-gray-100 pt-6">
-                                    <div className="flex flex-wrap gap-4 mb-4 items-center">
+                                    
+                                    {/* 상단 기본 정보 검수 영역 (시간, 전/후반 추가됨) */}
+                                    <div className="flex flex-wrap gap-4 mb-4 items-center bg-gray-50 p-3 rounded-lg border border-gray-200">
                                         <div className="flex items-center gap-2">
                                             <span className="text-sm font-bold text-gray-600">일시:</span>
-                                            <input type="date" value={analyzedData.date || ""} onChange={(e) => setAnalyzedData({...analyzedData, date: e.target.value})} className="border p-1.5 rounded-md text-sm font-medium focus:ring-2 outline-none" />
+                                            <input type="text" value={analyzedData.date || ""} onChange={(e) => setAnalyzedData({...analyzedData, date: e.target.value})} className="border p-1.5 rounded-md text-sm font-medium w-28 outline-none focus:border-emerald-500" placeholder="YYYY-MM-DD" />
+                                        </div>
+                                        <div className="flex items-center gap-2">
+                                            <span className="text-sm font-bold text-gray-600">시간:</span>
+                                            <input type="text" value={analyzedData.time || ""} onChange={(e) => setAnalyzedData({...analyzedData, time: e.target.value})} className="border p-1.5 rounded-md text-sm font-medium w-20 outline-none focus:border-emerald-500" placeholder="HH:MM" />
                                         </div>
                                         <div className="flex items-center gap-2">
                                             <span className="text-sm font-bold text-gray-600">구장:</span>
-                                            <input type="text" value={analyzedData.course || ""} onChange={(e) => setAnalyzedData({...analyzedData, course: e.target.value})} className="border p-1.5 rounded-md text-sm font-medium w-40" />
+                                            <input type="text" value={analyzedData.course || ""} onChange={(e) => setAnalyzedData({...analyzedData, course: e.target.value})} className="border p-1.5 rounded-md text-sm font-medium w-40 outline-none focus:border-emerald-500" />
+                                        </div>
+                                        <div className="flex items-center gap-2">
+                                            <span className="text-sm font-bold text-gray-600">전반코스:</span>
+                                            <input type="text" value={analyzedData.frontNineName || ""} onChange={(e) => setAnalyzedData({...analyzedData, frontNineName: e.target.value})} className="border p-1.5 rounded-md text-sm font-medium w-24 outline-none focus:border-emerald-500" />
+                                        </div>
+                                        <div className="flex items-center gap-2">
+                                            <span className="text-sm font-bold text-gray-600">후반코스:</span>
+                                            <input type="text" value={analyzedData.backNineName || ""} onChange={(e) => setAnalyzedData({...analyzedData, backNineName: e.target.value})} className="border p-1.5 rounded-md text-sm font-medium w-24 outline-none focus:border-emerald-500" />
                                         </div>
                                     </div>
-        
+
+                                    {/* 스코어 테이블 검수 영역 */}
                                     <div className="overflow-x-auto rounded-xl border border-gray-200 shadow-sm">
                                         <table className="w-full text-center text-xs whitespace-nowrap">
                                             <thead className="bg-slate-50 text-slate-500 uppercase tracking-wider">
                                                 <tr>
-                                                    <th className="p-2 border-r border-b w-16">구분</th>
+                                                    <th className="p-2 border-r border-b w-20">구분</th>
                                                     {[1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18].map(h => <th key={h} className="p-2 border-r border-b w-10">{h}</th>)}
                                                 </tr>
                                             </thead>
@@ -286,59 +304,76 @@
                                                 <tr>
                                                     <td className="p-2 border-r border-b font-bold bg-slate-100 text-gray-600">Par</td>
                                                     {analyzedData.par?.map((val, i) => (
-                                                        <td key={i} className="p-1 border-r border-b"><input type="number" value={val} onChange={(e) => handleArrayChange('par', i, e.target.value)} className="w-full text-center bg-transparent outline-none font-medium" /></td>
+                                                        <td key={i} className="p-0.5 border-r border-b"><input type="text" value={val || ""} onChange={(e) => handleArrayChange('par', i, e.target.value)} className="w-full text-center bg-transparent outline-none font-medium" /></td>
                                                     ))}
                                                 </tr>
                                                 <tr>
-                                                    <td className="p-2 border-r border-b font-bold bg-blue-50 text-blue-600">타수(상대)</td>
+                                                    <td className="p-2 border-r border-b font-bold bg-blue-50 text-blue-600">나(타수)</td>
                                                     {analyzedData.myScore?.map((val, i) => (
-                                                        <td key={i} className="p-1 border-r border-b bg-blue-50/30"><input type="number" value={val} onChange={(e) => handleArrayChange('myScore', i, e.target.value)} className="w-full text-center bg-transparent outline-none font-bold text-blue-700" /></td>
+                                                        <td key={i} className="p-0.5 border-r border-b bg-blue-50/30"><input type="text" value={val || ""} onChange={(e) => handleArrayChange('myScore', i, e.target.value)} className="w-full text-center bg-transparent outline-none font-bold text-blue-700" /></td>
                                                     ))}
                                                 </tr>
                                                 <tr>
                                                     <td className="p-2 border-r border-b font-bold text-gray-600">퍼트</td>
                                                     {analyzedData.putts?.map((val, i) => (
-                                                        <td key={i} className="p-1 border-r border-b"><input type="number" value={val} onChange={(e) => handleArrayChange('putts', i, e.target.value)} className="w-full text-center bg-transparent outline-none font-medium" /></td>
+                                                        <td key={i} className="p-0.5 border-r border-b"><input type="text" value={val || ""} onChange={(e) => handleArrayChange('putts', i, e.target.value)} className="w-full text-center bg-transparent outline-none font-medium" /></td>
                                                     ))}
                                                 </tr>
                                                 <tr>
-                                                    <td className="p-2 border-r border-b font-bold text-gray-600">F/W (Y/N)</td>
+                                                    <td className="p-2 border-r border-b font-bold text-gray-600">F/W (1,0)</td>
                                                     {analyzedData.fw?.map((val, i) => (
-                                                        <td key={i} className="p-1 border-r border-b"><input type="text" value={val || ""} onChange={(e) => handleArrayChange('fw', i, e.target.value.toUpperCase())} className="w-full text-center bg-transparent outline-none font-bold text-emerald-600 uppercase" maxLength={1} /></td>
+                                                        <td key={i} className="p-0.5 border-r border-b"><input type="text" value={val || ""} onChange={(e) => handleArrayChange('fw', i, e.target.value)} className="w-full text-center bg-transparent outline-none font-bold text-emerald-600" maxLength={1} /></td>
                                                     ))}
                                                 </tr>
                                                 <tr>
-                                                    <td className="p-2 border-r border-b font-bold text-gray-600">GIR (Y/N)</td>
+                                                    <td className="p-2 border-r border-b font-bold text-gray-600">GIR (1,0)</td>
                                                     {analyzedData.gir?.map((val, i) => (
-                                                        <td key={i} className="p-1 border-r border-b"><input type="text" value={val || ""} onChange={(e) => handleArrayChange('gir', i, e.target.value.toUpperCase())} className="w-full text-center bg-transparent outline-none font-bold text-indigo-600 uppercase" maxLength={1} /></td>
+                                                        <td key={i} className="p-0.5 border-r border-b"><input type="text" value={val || ""} onChange={(e) => handleArrayChange('gir', i, e.target.value)} className="w-full text-center bg-transparent outline-none font-bold text-indigo-600" maxLength={1} /></td>
                                                     ))}
                                                 </tr>
                                                 <tr>
                                                     <td className="p-2 border-r border-b font-bold text-gray-600">벌타</td>
                                                     {analyzedData.penalty?.map((val, i) => (
-                                                        <td key={i} className="p-1 border-r border-b"><input type="number" value={val} onChange={(e) => handleArrayChange('penalty', i, e.target.value)} className="w-full text-center bg-transparent outline-none font-bold text-red-500" /></td>
+                                                        <td key={i} className="p-0.5 border-r border-b"><input type="text" value={val || ""} onChange={(e) => handleArrayChange('penalty', i, e.target.value)} className="w-full text-center bg-transparent outline-none font-bold text-red-500" /></td>
                                                     ))}
                                                 </tr>
                                                 <tr>
                                                     <td className="p-2 border-r border-b font-bold text-gray-600">벙커</td>
                                                     {analyzedData.sand?.map((val, i) => (
-                                                        <td key={i} className="p-1 border-r border-b"><input type="number" value={val} onChange={(e) => handleArrayChange('sand', i, e.target.value)} className="w-full text-center bg-transparent outline-none font-bold text-yellow-600" /></td>
+                                                        <td key={i} className="p-0.5 border-r border-b"><input type="text" value={val || ""} onChange={(e) => handleArrayChange('sand', i, e.target.value)} className="w-full text-center bg-transparent outline-none font-bold text-yellow-600" /></td>
                                                     ))}
                                                 </tr>
+                                                
+                                                {/* 동반자 테이블 동적 렌더링 (최대 3명) */}
+                                                {analyzedData.partners?.map((partner, pIdx) => (
+                                                    <tr key={`partner-${pIdx}`}>
+                                                        <td className="p-0.5 border-r border-b font-bold bg-indigo-50 text-indigo-700">
+                                                            <input type="text" value={partner.name || ""} onChange={(e) => handlePartnerChange(pIdx, 'name', null, e.target.value)} className="w-full text-center bg-transparent outline-none font-bold" placeholder="동반자 이름" />
+                                                        </td>
+                                                        {partner.score?.map((val, i) => (
+                                                            <td key={`p-${pIdx}-${i}`} className="p-0.5 border-r border-b bg-indigo-50/30">
+                                                                <input type="text" value={val || ""} onChange={(e) => handlePartnerChange(pIdx, 'score', i, e.target.value)} className="w-full text-center bg-transparent outline-none font-bold text-indigo-700" />
+                                                            </td>
+                                                        ))}
+                                                    </tr>
+                                                ))}
                                             </tbody>
                                         </table>
                                     </div>
                                     
-                                    <p className="text-xs text-gray-400 flex items-center gap-1 mt-2">
-                                        <LucideIcon name="info" className="w-4 h-4" />
-                                        각 항목을 클릭하여 수정할 수 있습니다. 수정을 완료했다면 아래 버튼을 눌러 시트에 저장하세요.
-                                    </p>
-        
-                                    <button 
-                                        onClick={handleSaveToSheet} 
-                                        disabled={isSaving}
-                                        className={`w-full py-4 mt-6 rounded-xl font-black text-lg flex justify-center items-center gap-2 transition-all shadow-md ${isSaving ? 'bg-emerald-200 text-emerald-600 cursor-not-allowed' : 'bg-emerald-600 hover:bg-emerald-500 text-white hover:shadow-lg'}`}
-                                    >
+                                    <div className="flex justify-between items-center mt-2">
+                                        <p className="text-xs text-gray-400 flex items-center gap-1">
+                                            <LucideIcon name="info" className="w-4 h-4" />
+                                            테이블 내 항목을 클릭하여 수정할 수 있습니다. 
+                                        </p>
+                                        {(!analyzedData.partners || analyzedData.partners.length < 3) && (
+                                            <button onClick={addPartnerRow} className="text-xs bg-indigo-100 hover:bg-indigo-200 text-indigo-700 px-3 py-1.5 rounded-md font-bold transition-colors">
+                                                + 동반자 추가
+                                            </button>
+                                        )}
+                                    </div>
+
+                                    <button onClick={handleSaveToSheet} disabled={isSaving} className={`w-full py-4 mt-6 rounded-xl font-black text-lg flex justify-center items-center gap-2 transition-all shadow-md ${isSaving ? 'bg-emerald-200 text-emerald-600 cursor-not-allowed' : 'bg-emerald-600 hover:bg-emerald-500 text-white hover:shadow-lg'}`}>
                                         {isSaving ? "저장 중..." : (
                                             <>
                                                 <LucideIcon name="save" className="w-5 h-5" />
