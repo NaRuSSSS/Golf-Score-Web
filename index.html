@@ -254,37 +254,35 @@
             };
 
             const handleSyncToGoogleSheets = async () => {
-                if (!scriptUrl.trim()) {
-                    setShowUrlSettings(true);
-                    setErrorMsg("구글 시트 연동을 위해 'Apps Script 웹앱 URL'을 먼저 입력해주세요.");
-                    return;
-                }
-
+                // 고객님의 최신 구글 웹훅 URL 고정
+                const WEBHOOK_URL = "https://script.google.com/macros/s/AKfycbyyc7qVzufcIO1R4HYTVvCG3VFcIEt-D4q7E8GGkVQxCyHN5wdnwm6RFDe3ixIY7jHzSQ/exec";
+            
                 setIsSaving(true);
                 setErrorMsg("");
                 setResultMsg("구글 시트에 데이터를 기록하고 있습니다...");
-
+            
                 try {
-                    // Apps Script 웹앱에 POST 전송 (no-cors 브라우저 제약 대응을 위해 text/plain 전송 권장)
-                    await fetch(scriptUrl.trim(), {
+                    // mode: 'no-cors'를 제거하고 text/plain으로 위장하여 CORS 보안 완벽 우회
+                    const response = await fetch(WEBHOOK_URL, {
                         method: 'POST',
-                        mode: 'no-cors',
                         headers: { 'Content-Type': 'text/plain;charset=utf-8' },
                         body: JSON.stringify(editableData)
                     });
-
-                    localStorage.setItem('GOLF_GAS_URL', scriptUrl.trim());
-                    setResultMsg("🎉 구글 시트에 즉시 기록되었습니다! 대시보드 통계를 새로고침합니다.");
-
-                    // 대시보드 데이터 자동 갱신 트리거 호출
-                    if (onSaveSuccess) {
-                        setTimeout(() => {
-                            onSaveSuccess();
-                        }, 1200);
+            
+                    const result = await response.json();
+            
+                    if (result.status === "success" || result.result === "success") {
+                        setResultMsg(`🎉 성공적으로 기록되었습니다! (라운드 No. ${result.no || ''})`);
+                        // 성공 시 화면 자동 새로고침하여 통계 데이터 갱신
+                        setTimeout(() => window.location.reload(), 1500);
+                    } else {
+                        setErrorMsg("시트 기록 중 오류가 발생했습니다: " + (result.message || "다시 시도해주세요."));
+                        setResultMsg("");
                     }
                 } catch (err) {
-                    console.error(err);
-                    setErrorMsg("구글 시트 저장 실패: Apps Script URL 및 배포 권한(모든 사용자)을 확인하세요.");
+                    console.error("전송 에러:", err);
+                    setErrorMsg("구글 시트 전송에 실패했습니다. (보안 차단 또는 네트워크 문제)");
+                    setResultMsg("");
                 } finally {
                     setIsSaving(false);
                 }
