@@ -124,8 +124,14 @@
                     const result = await response.json();
 
                     if (result.success) {
-                        if (!result.data.partners) result.data.partners = [];
-                        setAnalyzedData(result.data); 
+                        const parsedData = result.data;
+                        // 동반자 칸을 무조건 기본 3명으로 세팅 (빈칸으로 채움)
+                        if (!parsedData.partners) parsedData.partners = [];
+                        while (parsedData.partners.length < 3) {
+                            parsedData.partners.push({ name: "", score: Array(18).fill("") });
+                        }
+                        
+                        setAnalyzedData(parsedData); 
                         setResultMsg("✅ 분석 완료! 아래 테이블을 검수 및 수정 후 저장해주세요.");
                     } else {
                         throw new Error(result.error);
@@ -139,7 +145,7 @@
                 }
             };
 
-            // ★ [추가됨] 직접 입력(수동 모드) 생성 핸들러
+            // 직접 입력(수동 모드) 생성 핸들러
             const handleManualInput = () => {
                 const blankData = {
                     date: "", time: "", course: "", frontNineName: "", backNineName: "",
@@ -150,7 +156,11 @@
                     gir: Array(18).fill(""),
                     sand: Array(18).fill(""),
                     penalty: Array(18).fill(""),
-                    partners: [ { name: "", score: Array(18).fill("") } ] // 기본으로 동반자 1명 빈칸 제공
+                    partners: [ 
+                        { name: "", score: Array(18).fill("") },
+                        { name: "", score: Array(18).fill("") },
+                        { name: "", score: Array(18).fill("") }
+                    ]
                 };
                 setAnalyzedData(blankData);
                 setResultMsg("✍️ 직접 입력 모드입니다. 테이블의 빈칸을 채운 후 저장해주세요.");
@@ -183,15 +193,6 @@
                 });
             };
 
-            // 동반자 추가 핸들러
-            const addPartnerRow = () => {
-                setAnalyzedData(prev => {
-                    const newPartners = [...(prev.partners || []), { name: "", score: Array(18).fill("") }];
-                    return { ...prev, partners: newPartners };
-                });
-            };
-
-            // 구글 시트 저장 핸들러
             const handleSaveToSheet = async () => {
                 setIsSaving(true);
                 setResultMsg("구글 시트에 데이터를 저장하고 있습니다...");
@@ -220,6 +221,9 @@
                     setIsSaving(false);
                 }
             };
+
+            // 테이블 렌더링에 사용되는 열 스타일 헬퍼 (9번과 10번 홀 사이 굵은 줄 표시)
+            const getBorderClass = (i) => i === 8 ? 'border-r-2 border-gray-300' : 'border-r';
 
             return (
                 <div className="animate-fade-in p-2 md:p-8 max-w-6xl mx-auto pb-20">
@@ -272,12 +276,11 @@
                             
                             {resultMsg && !errorMsg && (
                                 <div className={`p-4 rounded-xl text-[13px] md:text-sm font-bold flex items-center gap-2 border ${isAnalyzing || isSaving ? 'bg-blue-50 text-blue-600 border-blue-100' : 'bg-emerald-50 text-emerald-600 border-emerald-100'}`}>
-                                    {(isAnalyzing || isSaving) ? <LucideIcon name="loader-2" className="w-5 h-5 shrink-0 animate-spin" /> : <LucideIcon name="check-circle" className="w-5 h-5 shrink-0" />}
+                                    {(isAnalyzing || isSaving) ? <LucideIcon name="loader-2" className="w-5 h-5 shrink-0 animate-spin" /> : <LucideIcon name="edit-3" className="w-5 h-5 shrink-0" />}
                                     {resultMsg}
                                 </div>
                             )}
 
-                            {/* ★ [수정됨] 버튼 영역: AI 분석 버튼과 직접 입력 버튼을 위아래로 배치 */}
                             {!analyzedData && (
                                 <div className="flex flex-col gap-3 mt-6">
                                     <button onClick={handleAnalyze} disabled={isAnalyzing} className={`w-full py-4 rounded-xl font-black text-lg flex justify-center items-center gap-2 transition-all shadow-md ${isAnalyzing ? 'bg-gray-200 text-gray-400 cursor-not-allowed' : 'bg-gray-900 hover:bg-gray-800 text-white hover:shadow-lg'}`}>
@@ -294,27 +297,31 @@
                             {analyzedData && (
                                 <div className="mt-8 animate-fade-in space-y-4 border-t border-gray-100 pt-6">
                                     
-                                    {/* 상단 기본 정보 검수 영역 */}
-                                    <div className="flex flex-wrap gap-4 mb-4 items-center bg-gray-50 p-3 rounded-lg border border-gray-200">
-                                        <div className="flex items-center gap-2">
-                                            <span className="text-sm font-bold text-gray-600">일시:</span>
-                                            <input type="text" value={analyzedData.date || ""} onChange={(e) => setAnalyzedData({...analyzedData, date: e.target.value})} className="border p-1.5 rounded-md text-sm font-medium w-28 outline-none focus:border-emerald-500" placeholder="YYYY-MM-DD" />
+                                    {/* 상단 2단 기본 정보 영역 */}
+                                    <div className="flex flex-col gap-3 mb-4 bg-gray-50 p-4 rounded-lg border border-gray-200">
+                                        <div className="flex flex-wrap items-center gap-4">
+                                            <div className="flex items-center gap-2">
+                                                <span className="text-sm font-bold text-gray-600 w-10">일시:</span>
+                                                <input type="text" value={analyzedData.date || ""} onChange={(e) => setAnalyzedData({...analyzedData, date: e.target.value})} className="border p-1.5 rounded-md text-sm font-medium w-36 outline-none focus:border-emerald-500" placeholder="YYYY-MM-DD" />
+                                            </div>
+                                            <div className="flex items-center gap-2">
+                                                <span className="text-sm font-bold text-gray-600">시간:</span>
+                                                <input type="text" value={analyzedData.time || ""} onChange={(e) => setAnalyzedData({...analyzedData, time: e.target.value})} className="border p-1.5 rounded-md text-sm font-medium w-24 outline-none focus:border-emerald-500" placeholder="HH:MM" />
+                                            </div>
+                                            <div className="flex items-center gap-2">
+                                                <span className="text-sm font-bold text-gray-600">구장:</span>
+                                                <input type="text" value={analyzedData.course || ""} onChange={(e) => setAnalyzedData({...analyzedData, course: e.target.value})} className="border p-1.5 rounded-md text-sm font-medium w-48 outline-none focus:border-emerald-500" />
+                                            </div>
                                         </div>
-                                        <div className="flex items-center gap-2">
-                                            <span className="text-sm font-bold text-gray-600">시간:</span>
-                                            <input type="text" value={analyzedData.time || ""} onChange={(e) => setAnalyzedData({...analyzedData, time: e.target.value})} className="border p-1.5 rounded-md text-sm font-medium w-20 outline-none focus:border-emerald-500" placeholder="HH:MM" />
-                                        </div>
-                                        <div className="flex items-center gap-2">
-                                            <span className="text-sm font-bold text-gray-600">구장:</span>
-                                            <input type="text" value={analyzedData.course || ""} onChange={(e) => setAnalyzedData({...analyzedData, course: e.target.value})} className="border p-1.5 rounded-md text-sm font-medium w-40 outline-none focus:border-emerald-500" />
-                                        </div>
-                                        <div className="flex items-center gap-2">
-                                            <span className="text-sm font-bold text-gray-600">전반코스:</span>
-                                            <input type="text" value={analyzedData.frontNineName || ""} onChange={(e) => setAnalyzedData({...analyzedData, frontNineName: e.target.value})} className="border p-1.5 rounded-md text-sm font-medium w-24 outline-none focus:border-emerald-500" />
-                                        </div>
-                                        <div className="flex items-center gap-2">
-                                            <span className="text-sm font-bold text-gray-600">후반코스:</span>
-                                            <input type="text" value={analyzedData.backNineName || ""} onChange={(e) => setAnalyzedData({...analyzedData, backNineName: e.target.value})} className="border p-1.5 rounded-md text-sm font-medium w-24 outline-none focus:border-emerald-500" />
+                                        <div className="flex flex-wrap items-center gap-4 pt-1">
+                                            <div className="flex items-center gap-2">
+                                                <span className="text-sm font-bold text-gray-600 w-16">전반코스:</span>
+                                                <input type="text" value={analyzedData.frontNineName || ""} onChange={(e) => setAnalyzedData({...analyzedData, frontNineName: e.target.value})} className="border p-1.5 rounded-md text-sm font-medium w-32 outline-none focus:border-emerald-500" />
+                                            </div>
+                                            <div className="flex items-center gap-2">
+                                                <span className="text-sm font-bold text-gray-600 w-16">후반코스:</span>
+                                                <input type="text" value={analyzedData.backNineName || ""} onChange={(e) => setAnalyzedData({...analyzedData, backNineName: e.target.value})} className="border p-1.5 rounded-md text-sm font-medium w-32 outline-none focus:border-emerald-500" />
+                                            </div>
                                         </div>
                                     </div>
 
@@ -323,63 +330,69 @@
                                         <table className="w-full text-center text-xs whitespace-nowrap">
                                             <thead className="bg-slate-50 text-slate-500 uppercase tracking-wider">
                                                 <tr>
-                                                    <th className="p-2 border-r border-b w-20">구분</th>
-                                                    {[1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18].map(h => <th key={h} className="p-2 border-r border-b w-10">{h}</th>)}
+                                                    <th rowSpan="2" className="p-2 border-r border-b w-20 align-middle">구분</th>
+                                                    <th colSpan="9" className="p-1.5 border-r-2 border-gray-300 border-b bg-gray-100 text-gray-600 font-bold">전반</th>
+                                                    <th colSpan="9" className="p-1.5 border-b bg-gray-100 text-gray-600 font-bold">후반</th>
+                                                </tr>
+                                                <tr>
+                                                    {[1,2,3,4,5,6,7,8,9, 1,2,3,4,5,6,7,8,9].map((h, i) => (
+                                                        <th key={i} className={`p-2 border-b w-10 bg-white ${getBorderClass(i)}`}>{h}</th>
+                                                    ))}
                                                 </tr>
                                             </thead>
                                             <tbody>
                                                 <tr>
                                                     <td className="p-2 border-r border-b font-bold bg-slate-100 text-gray-600">Par</td>
                                                     {analyzedData.par?.map((val, i) => (
-                                                        <td key={i} className="p-0.5 border-r border-b"><input type="text" value={val || ""} onChange={(e) => handleArrayChange('par', i, e.target.value)} className="w-full text-center bg-transparent outline-none font-medium" /></td>
+                                                        <td key={i} className={`p-1 border-b ${getBorderClass(i)}`}><input type="text" value={val || ""} onChange={(e) => handleArrayChange('par', i, e.target.value)} className="w-full py-1 text-center bg-transparent outline-none font-medium" /></td>
                                                     ))}
                                                 </tr>
                                                 <tr>
-                                                    <td className="p-2 border-r border-b font-bold bg-blue-50 text-blue-600">나(타수)</td>
+                                                    <td className="p-2 border-r border-b font-bold bg-blue-50 text-blue-600">타수</td>
                                                     {analyzedData.myScore?.map((val, i) => (
-                                                        <td key={i} className="p-0.5 border-r border-b bg-blue-50/30"><input type="text" value={val || ""} onChange={(e) => handleArrayChange('myScore', i, e.target.value)} className="w-full text-center bg-transparent outline-none font-bold text-blue-700" /></td>
+                                                        <td key={i} className={`p-1 border-b bg-blue-50/30 ${getBorderClass(i)}`}><input type="text" value={val || ""} onChange={(e) => handleArrayChange('myScore', i, e.target.value)} className="w-full py-1 text-center bg-transparent outline-none font-bold text-blue-700" /></td>
                                                     ))}
                                                 </tr>
                                                 <tr>
                                                     <td className="p-2 border-r border-b font-bold text-gray-600">퍼트</td>
                                                     {analyzedData.putts?.map((val, i) => (
-                                                        <td key={i} className="p-0.5 border-r border-b"><input type="text" value={val || ""} onChange={(e) => handleArrayChange('putts', i, e.target.value)} className="w-full text-center bg-transparent outline-none font-medium" /></td>
+                                                        <td key={i} className={`p-1 border-b ${getBorderClass(i)}`}><input type="text" value={val || ""} onChange={(e) => handleArrayChange('putts', i, e.target.value)} className="w-full py-1 text-center bg-transparent outline-none font-medium" /></td>
                                                     ))}
                                                 </tr>
                                                 <tr>
-                                                    <td className="p-2 border-r border-b font-bold text-gray-600">F/W (1,0)</td>
+                                                    <td className="p-2 border-r border-b font-bold text-gray-600">F/W</td>
                                                     {analyzedData.fw?.map((val, i) => (
-                                                        <td key={i} className="p-0.5 border-r border-b"><input type="text" value={val || ""} onChange={(e) => handleArrayChange('fw', i, e.target.value)} className="w-full text-center bg-transparent outline-none font-bold text-emerald-600" maxLength={1} /></td>
+                                                        <td key={i} className={`p-1 border-b ${getBorderClass(i)}`}><input type="text" value={val || ""} onChange={(e) => handleArrayChange('fw', i, e.target.value)} className="w-full py-1 text-center bg-transparent outline-none font-bold text-emerald-600" maxLength={1} /></td>
                                                     ))}
                                                 </tr>
                                                 <tr>
-                                                    <td className="p-2 border-r border-b font-bold text-gray-600">GIR (1,0)</td>
+                                                    <td className="p-2 border-r border-b font-bold text-gray-600">GIR</td>
                                                     {analyzedData.gir?.map((val, i) => (
-                                                        <td key={i} className="p-0.5 border-r border-b"><input type="text" value={val || ""} onChange={(e) => handleArrayChange('gir', i, e.target.value)} className="w-full text-center bg-transparent outline-none font-bold text-indigo-600" maxLength={1} /></td>
+                                                        <td key={i} className={`p-1 border-b ${getBorderClass(i)}`}><input type="text" value={val || ""} onChange={(e) => handleArrayChange('gir', i, e.target.value)} className="w-full py-1 text-center bg-transparent outline-none font-bold text-indigo-600" maxLength={1} /></td>
                                                     ))}
                                                 </tr>
                                                 <tr>
                                                     <td className="p-2 border-r border-b font-bold text-gray-600">벌타</td>
                                                     {analyzedData.penalty?.map((val, i) => (
-                                                        <td key={i} className="p-0.5 border-r border-b"><input type="text" value={val || ""} onChange={(e) => handleArrayChange('penalty', i, e.target.value)} className="w-full text-center bg-transparent outline-none font-bold text-red-500" /></td>
+                                                        <td key={i} className={`p-1 border-b ${getBorderClass(i)}`}><input type="text" value={val || ""} onChange={(e) => handleArrayChange('penalty', i, e.target.value)} className="w-full py-1 text-center bg-transparent outline-none font-bold text-red-500" /></td>
                                                     ))}
                                                 </tr>
                                                 <tr>
                                                     <td className="p-2 border-r border-b font-bold text-gray-600">벙커</td>
                                                     {analyzedData.sand?.map((val, i) => (
-                                                        <td key={i} className="p-0.5 border-r border-b"><input type="text" value={val || ""} onChange={(e) => handleArrayChange('sand', i, e.target.value)} className="w-full text-center bg-transparent outline-none font-bold text-yellow-600" /></td>
+                                                        <td key={i} className={`p-1 border-b ${getBorderClass(i)}`}><input type="text" value={val || ""} onChange={(e) => handleArrayChange('sand', i, e.target.value)} className="w-full py-1 text-center bg-transparent outline-none font-bold text-yellow-600" /></td>
                                                     ))}
                                                 </tr>
                                                 
-                                                {/* 동반자 테이블 동적 렌더링 (최대 3명) */}
+                                                {/* 기본 3줄 동반자 테이블 렌더링 (행 높이 일치) */}
                                                 {analyzedData.partners?.map((partner, pIdx) => (
                                                     <tr key={`partner-${pIdx}`}>
-                                                        <td className="p-0.5 border-r border-b font-bold bg-indigo-50 text-indigo-700">
-                                                            <input type="text" value={partner.name || ""} onChange={(e) => handlePartnerChange(pIdx, 'name', null, e.target.value)} className="w-full text-center bg-transparent outline-none font-bold" placeholder="동반자 이름" />
+                                                        <td className="p-2 border-r border-b font-bold bg-indigo-50 text-indigo-700">
+                                                            <input type="text" value={partner.name || ""} onChange={(e) => handlePartnerChange(pIdx, 'name', null, e.target.value)} className="w-full py-1 text-center bg-transparent outline-none font-bold placeholder-indigo-300" placeholder={`동반자 ${pIdx + 1}`} />
                                                         </td>
                                                         {partner.score?.map((val, i) => (
-                                                            <td key={`p-${pIdx}-${i}`} className="p-0.5 border-r border-b bg-indigo-50/30">
-                                                                <input type="text" value={val || ""} onChange={(e) => handlePartnerChange(pIdx, 'score', i, e.target.value)} className="w-full text-center bg-transparent outline-none font-bold text-indigo-700" />
+                                                            <td key={`p-${pIdx}-${i}`} className={`p-1 border-b bg-indigo-50/30 ${getBorderClass(i)}`}>
+                                                                <input type="text" value={val || ""} onChange={(e) => handlePartnerChange(pIdx, 'score', i, e.target.value)} className="w-full py-1 text-center bg-transparent outline-none font-bold text-indigo-700" />
                                                             </td>
                                                         ))}
                                                     </tr>
@@ -393,11 +406,6 @@
                                             <LucideIcon name="info" className="w-4 h-4" />
                                             테이블 내 항목을 클릭하여 직접 수정 및 입력할 수 있습니다. 
                                         </p>
-                                        {(!analyzedData.partners || analyzedData.partners.length < 3) && (
-                                            <button onClick={addPartnerRow} className="text-xs bg-indigo-100 hover:bg-indigo-200 text-indigo-700 px-3 py-1.5 rounded-md font-bold transition-colors">
-                                                + 동반자 추가
-                                            </button>
-                                        )}
                                     </div>
 
                                     <button onClick={handleSaveToSheet} disabled={isSaving} className={`w-full py-4 mt-6 rounded-xl font-black text-lg flex justify-center items-center gap-2 transition-all shadow-md ${isSaving ? 'bg-emerald-200 text-emerald-600 cursor-not-allowed' : 'bg-emerald-600 hover:bg-emerald-500 text-white hover:shadow-lg'}`}>
