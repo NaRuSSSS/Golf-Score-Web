@@ -153,7 +153,6 @@
                     myScore: Array(18).fill(""),
                     putts: Array(18).fill(""),
                     fw: Array(18).fill(""),
-                    gir: Array(18).fill(""),
                     sand: Array(18).fill(""),
                     penalty: Array(18).fill(""),
                     partners: [ 
@@ -325,7 +324,7 @@
                                         </div>
                                     </div>
 
-                                    {/* 스코어 테이블 검수 영역 */}
+                                    {/* 스코어 테이블 검수 영역 (GIR 행 제거됨) */}
                                     <div className="overflow-x-auto rounded-xl border border-gray-200 shadow-sm">
                                         <table className="w-full text-center text-xs whitespace-nowrap">
                                             <thead className="bg-slate-50 text-slate-500 uppercase tracking-wider">
@@ -363,12 +362,6 @@
                                                     <td className="p-2 border-r border-b font-bold text-gray-600">F/W</td>
                                                     {analyzedData.fw?.map((val, i) => (
                                                         <td key={i} className={`p-1 border-b ${getBorderClass(i)}`}><input type="text" value={val || ""} onChange={(e) => handleArrayChange('fw', i, e.target.value)} className="w-full py-1 text-center bg-transparent outline-none font-bold text-emerald-600" maxLength={1} /></td>
-                                                    ))}
-                                                </tr>
-                                                <tr>
-                                                    <td className="p-2 border-r border-b font-bold text-gray-600">GIR</td>
-                                                    {analyzedData.gir?.map((val, i) => (
-                                                        <td key={i} className={`p-1 border-b ${getBorderClass(i)}`}><input type="text" value={val || ""} onChange={(e) => handleArrayChange('gir', i, e.target.value)} className="w-full py-1 text-center bg-transparent outline-none font-bold text-indigo-600" maxLength={1} /></td>
                                                     ))}
                                                 </tr>
                                                 <tr>
