@@ -708,10 +708,10 @@
                         cur.frontHalf.ud = processPerc(frontTotal);
                         cur.backHalf.ud = processPerc(backTotal);
                         for(let k=0; k<9; k++) {
-                            cur.holes[k].ud = String(row[colDetail + 1 + k] || '').trim();
-                            cur.holes[k+9].ud = String(row[colDetail + 11 + k] || '').trim();
+                            cur.holes[k].ud = processYN(row[colDetail + 1 + k]);
+                            cur.holes[k+9].ud = processYN(row[colDetail + 11 + k]);
                         }
-                    } 
+                    }
                     else if (gVal === 'Panelty') {
                         cur.penalties = totalNum;
                         cur.frontHalf.penalties = frontTotal;
@@ -2063,6 +2063,14 @@
         };
 
         const HoleTable = ({ holes }) => {
+            // 수식 결과(1, 0, TRUE, FALSE 등)를 완벽하게 기호로 변환하는 헬퍼 함수
+            const renderYN = (val) => {
+                const v = String(val || '').trim().toUpperCase();
+                if (['Y', '1', 'TRUE', 'O'].includes(v)) return '✔';
+                if (['N', '0', 'FALSE', 'X'].includes(v)) return '-';
+                return val;
+            };
+
             return (
                 <div className="overflow-x-auto rounded-xl border border-gray-200 bg-white shadow-sm">
                     <table className="w-full text-center border-collapse">
@@ -2095,27 +2103,24 @@
                             </tr>
                             <tr>
                                 <td className="p-1 sm:p-1.5 border-r border-b text-slate-500 text-left pl-2 sm:pl-3 whitespace-nowrap">F/W</td>
-                                {holes.map((h, i) => (
-                                    <td key={`fw-${i}`} className={`p-1 sm:p-1.5 border-r border-b font-bold text-[14px] whitespace-nowrap ${h.fw==='Y'?'text-emerald-500':h.fw==='N'?'text-gray-300':''}`}>
-                                        {h.fw === 'Y' ? '✔' : h.fw === 'N' ? '-' : h.fw}
-                                    </td>
-                                ))}
+                                {holes.map((h, i) => {
+                                    const v = renderYN(h.fw);
+                                    return <td key={`fw-${i}`} className={`p-1 sm:p-1.5 border-r border-b font-bold text-[14px] whitespace-nowrap ${v==='✔'?'text-emerald-500':v==='-'?'text-gray-300':''}`}>{v}</td>
+                                })}
                             </tr>
                             <tr>
                                 <td className="p-1 sm:p-1.5 border-r border-b text-slate-500 text-left pl-2 sm:pl-3 whitespace-nowrap">GIR</td>
-                                {holes.map((h, i) => (
-                                    <td key={`g-${i}`} className={`p-1 sm:p-1.5 border-r border-b font-bold text-[14px] whitespace-nowrap ${h.gir==='Y'?'text-indigo-500':h.gir==='N'?'text-gray-300':''}`}>
-                                        {h.gir === 'Y' ? '✔' : h.gir === 'N' ? '-' : h.gir}
-                                    </td>
-                                ))}
+                                {holes.map((h, i) => {
+                                    const v = renderYN(h.gir);
+                                    return <td key={`g-${i}`} className={`p-1 sm:p-1.5 border-r border-b font-bold text-[14px] whitespace-nowrap ${v==='✔'?'text-indigo-500':v==='-'?'text-gray-300':''}`}>{v}</td>
+                                })}
                             </tr>
                             <tr>
                                 <td className="p-1 sm:p-1.5 border-r border-b text-slate-500 text-left pl-2 sm:pl-3 whitespace-nowrap">U/D</td>
-                                {holes.map((h, i) => (
-                                    <td key={`ud-${i}`} className={`p-1 sm:p-1.5 border-r border-b font-bold text-[14px] whitespace-nowrap ${h.ud==='Y'?'text-purple-500':h.ud==='N'?'text-gray-300':''}`}>
-                                        {h.ud === 'Y' ? '✔' : h.ud === 'N' ? '-' : h.ud}
-                                    </td>
-                                ))}
+                                {holes.map((h, i) => {
+                                    const v = renderYN(h.ud);
+                                    return <td key={`ud-${i}`} className={`p-1 sm:p-1.5 border-r border-b font-bold text-[14px] whitespace-nowrap ${v==='✔'?'text-purple-500':v==='-'?'text-gray-300':''}`}>{v}</td>
+                                })}
                             </tr>
                             <tr>
                                 <td className="p-1 sm:p-1.5 border-r border-b text-slate-500 text-left pl-2 sm:pl-3 whitespace-nowrap">Penalty</td>
