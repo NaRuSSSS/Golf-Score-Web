@@ -788,13 +788,12 @@
                         </nav>
                         
                         <div className="absolute bottom-8 left-0 right-0 px-6">
-                            <label className="flex items-center justify-center gap-2 w-full bg-slate-800 hover:bg-slate-700 text-sm py-3 rounded-xl cursor-pointer transition-colors border border-slate-700 shadow-sm">
-                                <LucideIcon name="upload" className="w-4 h-4" />
-                                <span>엑셀 데이터 업로드</span>
-                                <input type="file" className="hidden" accept=".xlsx, .xls" onChange={handleFileUpload} />
-                            </label>
-                            <p className="text-xs text-center text-slate-500 mt-3 flex items-center justify-center gap-1">
-                                <span className="w-2 h-2 rounded-full bg-emerald-500"></span> Google Sheets 연동 중
+                            <p className="text-xs text-center text-slate-400 flex items-center justify-center gap-1.5">
+                                <span className="relative flex h-2 w-2">
+                                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                                  <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
+                                </span>
+                                Google Sheets 연동 중
                             </p>
                         </div>
                     </div>
