@@ -1560,13 +1560,14 @@
                                 </div>
                                 <h3 className="text-base font-bold text-gray-800">분석할 구장 선택</h3>
                             </div>
-                            <select 
-                                className="w-full border-2 border-gray-200 rounded-xl px-3 py-1.5 font-bold text-gray-800 text-base focus:ring-emerald-500 focus:border-emerald-500 outline-none bg-gray-50 hover:bg-white transition-colors cursor-pointer"
+                            <SearchableSelect 
+                                options={courseCounts.map(c => ({ value: c.name, label: `${c.name} (${c.count}회 플레이)` }))}
                                 value={selectedCourse}
-                                onChange={(e) => setSelectedCourse(e.target.value)}
-                            >
-                                {courseCounts.map(c => <option key={c.name} value={c.name}>{c.name} ({c.count}회 플레이)</option>)}
-                            </select>
+                                onChange={setSelectedCourse}
+                                placeholder="구장을 검색하세요"
+                                triggerClassName="w-full border-2 border-gray-200 rounded-xl px-4 py-2.5 font-bold text-gray-800 text-base bg-gray-50 hover:bg-white transition-colors cursor-pointer flex justify-between items-center"
+                                dropdownColor="emerald"
+                            />
                             
                             <div className="grid grid-cols-3 md:grid-cols-6 gap-2 mt-1">
                                 <div className="bg-blue-50 rounded-lg py-2 px-1 border border-blue-100 text-center flex flex-col justify-center">
@@ -1937,13 +1938,14 @@
                                 <LucideIcon name="user-search" className="w-6 h-6" />
                             </div>
                             <label className="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">동반자 선택</label>
-                            <select 
-                                className="w-full border-b-2 border-indigo-500 pb-2 text-xl font-black text-gray-800 text-center focus:outline-none bg-transparent cursor-pointer hover:bg-gray-50 rounded-t-lg transition-colors"
+                            <SearchableSelect 
+                                options={partnersCount.map(p => ({ value: p.name, label: `${p.name} (${p.count}회)` }))}
                                 value={selectedPartner}
-                                onChange={(e) => setSelectedPartner(e.target.value)}
-                            >
-                                {partnersCount.map(p => <option key={p.name} value={p.name}>{p.name} ({p.count}회)</option>)}
-                            </select>
+                                onChange={setSelectedPartner}
+                                placeholder="동반자를 검색하세요"
+                                triggerClassName="w-full border-b-2 border-indigo-500 pb-2 text-xl font-black text-gray-800 focus:outline-none bg-transparent cursor-pointer hover:bg-gray-50 rounded-t-lg transition-colors flex justify-center items-center gap-2"
+                                dropdownColor="indigo"
+                            />
                         </div>
 
                         {h2hData.matches.length > 0 && (
