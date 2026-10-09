@@ -62,11 +62,20 @@
         };
 
         const AIVisionUploadTab = () => {
+            // ↓↓↓ 여기에 현재 사용 중이신 GAS 웹 앱 URL을 다시 넣어주세요 ↓↓↓
+            const GAS_WEB_APP_URL = "https://script.google.com/macros/s/AKfycbzOzL3J9Sr04gFroynWgj4XZxt4zH3VmFTbiFn4NpdrWOekg3eJWQojnBimkmSQy2qhCw/exec";
+            // ↑↑↑================================================================↑↑↑
+
             const [images, setImages] = useState({ summary: null, details: null });
             const [previews, setPreviews] = useState({ summary: null, details: null });
+            
             const [isAnalyzing, setIsAnalyzing] = useState(false);
+            const [isSaving, setIsSaving] = useState(false);
+            
             const [resultMsg, setResultMsg] = useState("");
             const [errorMsg, setErrorMsg] = useState("");
+            
+            const [analyzedData, setAnalyzedData] = useState(null);
 
             const handleFileChange = (type, e) => {
                 const file = e.target.files[0];
@@ -85,217 +94,141 @@
                 reader.onerror = error => reject(error);
             });
 
-            const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
-
-            const fetchWithRetry = async (url, options, maxRetries = 3) => {
-                let delay = 1000;
-                for (let i = 0; i < maxRetries; i++) {
-                    try {
-                        const response = await fetch(url, options);
-                        if (response.status === 429) {
-                            await sleep(delay);
-                            delay *= 2;
-                            continue;
-                        }
-                        if (!response.ok) throw new Error(`HTTP ${response.status}`);
-                        return await response.json();
-                    } catch (err) {
-                        if (i === maxRetries - 1) throw err;
-                        await sleep(delay);
-                        delay *= 2;
-                    }
-                }
-            };
-
+            // AI 분석 요청 핸들러
             const handleAnalyze = async () => {
                 if (!images.summary) {
-                    setErrorMsg("최소한 스코어카드 사진(요약)은 업로드해주세요.");
+                    setErrorMsg("스코어카드 요약 사진은 필수입니다.");
                     return;
                 }
                 setIsAnalyzing(true);
                 setResultMsg("AI가 이미지를 판독하고 있습니다... (약 10초 소요)");
                 setErrorMsg("");
+                setAnalyzedData(null);
 
                 try {
                     const base64Summary = await fileToBase64(images.summary);
-                    let parts = [
-                        { text: `Analyze the provided golf scorecard images. Extract data into the requested JSON schema.
-                        - Convert all scores to relative to par (e.g., 0 for par, 1 for bogey, -1 for birdie, 2 for double bogey).
-                        - FW (Fairway Hit): 'Y' (Hit) or 'N' (Miss). If it is a Par 3 hole, use an empty string "".
-                        - GIR (Green In Regulation): 'Y' or 'N'.
-                        - Putts, Sand, Penalty: Extract exact numbers. If blank, use 0.
-                        - Course Names: Extract front and back nine names.
-                        - Ensure exactly 18 values in arrays. Fill with 0 or '' if unknown.` },
-                        { inlineData: { mimeType: images.summary.type, data: base64Summary } }
-                    ];
+                    let payloadImages = { summary: { type: images.summary.type, base64: base64Summary } };
 
                     if (images.details) {
                         const base64Details = await fileToBase64(images.details);
-                        parts.push({ inlineData: { mimeType: images.details.type, data: base64Details } });
+                        payloadImages.details = { type: images.details.type, base64: base64Details };
                     }
 
-                    const payload = {
-                        contents: [{ role: "user", parts: parts }],
-                        generationConfig: {
-                            responseMimeType: "application/json",
-                            responseSchema: {
-                                type: "OBJECT",
-                                properties: {
-                                    date: { type: "STRING", description: "YYYY-MM-DD" },
-                                    time: { type: "STRING", description: "HH:MM" },
-                                    course: { type: "STRING" },
-                                    frontNineName: { type: "STRING" },
-                                    backNineName: { type: "STRING" },
-                                    par: { type: "ARRAY", items: { type: "NUMBER" } },
-                                    myScore: { type: "ARRAY", items: { type: "NUMBER" } },
-                                    putts: { type: "ARRAY", items: { type: "NUMBER" } },
-                                    fw: { type: "ARRAY", items: { type: "STRING" } },
-                                    gir: { type: "ARRAY", items: { type: "STRING" } },
-                                    sand: { type: "ARRAY", items: { type: "NUMBER" } },
-                                    penalty: { type: "ARRAY", items: { type: "NUMBER" } },
-                                    partners: {
-                                        type: "ARRAY",
-                                        items: {
-                                            type: "OBJECT",
-                                            properties: {
-                                                name: { type: "STRING" },
-                                                score: { type: "ARRAY", items: { type: "NUMBER" } }
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    };
-
-                    const apiKey = ""; // API Key omitted deliberately for Immersive Canvas injection
-                    const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-3-flash-preview:generateContent?key=${apiKey}`;
-
-                    const result = await fetchWithRetry(apiUrl, {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify(payload)
+                    const response = await fetch(GAS_WEB_APP_URL, {
+                        method: "POST",
+                        redirect: "follow",
+                        headers: { "Content-Type": "text/plain;charset=utf-8" },
+                        body: JSON.stringify({ action: "analyze", images: payloadImages })
                     });
 
-                    if (!result.candidates || result.candidates.length === 0) {
-                        throw new Error("AI 응답을 받지 못했습니다.");
-                    }
+                    const result = await response.json();
 
-                    let jsonStr = result.candidates[0].content.parts[0].text;
-                    if (jsonStr.includes('```')) {
-                        jsonStr = jsonStr.replace(/```json/g, '').replace(/```/g, '').trim();
+                    if (result.success) {
+                        const parsedData = result.data;
+                        if (!parsedData.partners) parsedData.partners = [];
+                        while (parsedData.partners.length < 3) {
+                            parsedData.partners.push({ name: "", score: Array(18).fill("") });
+                        }
+                        
+                        setAnalyzedData(parsedData); 
+                        setResultMsg("✅ 분석 완료! 아래 테이블을 검수 및 수정 후 저장해주세요.");
+                    } else {
+                        throw new Error(result.error);
                     }
-                    const data = JSON.parse(jsonStr);
-                    
-                    generateExcel(data);
-                    setResultMsg("✅ 분석 완료! 구글 시트용 엑셀 파일이 다운로드되었습니다.");
                 } catch (err) {
                     console.error(err);
-                    setErrorMsg("분석 중 오류가 발생했습니다: 사진이 흔들렸거나 양식이 다를 수 있습니다.");
+                    setErrorMsg(`분석 실패: ${err.message}`);
                     setResultMsg("");
                 } finally {
                     setIsAnalyzing(false);
                 }
             };
 
-            const generateExcel = (d) => {
-                const safeArr = (arr, len, def) => {
-                    const res = Array.isArray(arr) ? arr : [];
-                    while(res.length < len) res.push(def);
-                    return res.slice(0, len);
+            // 직접 입력(수동 모드) 생성 핸들러
+            const handleManualInput = () => {
+                const blankData = {
+                    date: "", time: "", course: "", frontNineName: "", backNineName: "",
+                    par: Array(18).fill(""),
+                    myScore: Array(18).fill(""),
+                    putts: Array(18).fill(""),
+                    fw: Array(18).fill(""),
+                    sand: Array(18).fill(""),
+                    penalty: Array(18).fill(""),
+                    partners: [ 
+                        { name: "", score: Array(18).fill("") },
+                        { name: "", score: Array(18).fill("") },
+                        { name: "", score: Array(18).fill("") }
+                    ]
                 };
-                
-                const p = safeArr(d.par, 18, 4);
-                const myS = safeArr(d.myScore, 18, 0);
-                const putts = safeArr(d.putts, 18, 2);
-                const fwRaw = safeArr(d.fw, 18, "");
-                const gir = safeArr(d.gir, 18, "");
-                const sand = safeArr(d.sand, 18, 0);
-                const pen = safeArr(d.penalty, 18, 0);
+                setAnalyzedData(blankData);
+                setResultMsg("✍️ 직접 입력 모드입니다. 테이블의 빈칸을 채운 후 저장해주세요.");
+                setErrorMsg("");
+            };
 
-                const sum = (arr, s, e) => arr.slice(s,e).reduce((a,b)=>a+(Number(b)||0), 0);
-                const sumScoreAbs = (parArr, relArr, s, e) => {
-                    let tot = 0;
-                    for(let i=s; i<e; i++) tot += (Number(parArr[i])||0) + (Number(relArr[i])||0);
-                    return tot;
-                };
+            const handleArrayChange = (key, index, value) => {
+                setAnalyzedData(prev => {
+                    const newArr = [...(prev[key] || Array(18).fill(""))];
+                    newArr[index] = value;
+                    return { ...prev, [key]: newArr };
+                });
+            };
 
-                // FW 매핑 (Y -> 1, N -> 0, 빈칸은 빈칸)
-                const mappedFw = fwRaw.map(v => v === 'Y' ? 1 : v === 'N' ? 0 : "");
-                
-                // 0을 공란으로 매핑하는 헬퍼 함수 (벌타, 벙커용)
-                const zeroToEmpty = (val) => (val === 0 || val === "0") ? "" : val;
-                
-                const mappedPen = pen.map(zeroToEmpty);
-                const mappedSand = sand.map(zeroToEmpty);
-
-                const wsData = [
-                    ["No", "일시", "시간", "구장", "이름", "세부", "1", "2", "3", "4", "5", "6", "7", "8", "9", "전반", "1", "2", "3", "4", "5", "6", "7", "8", "9", "후반", "Total", "상대"],
+            const handlePartnerChange = (pIdx, key, index, value) => {
+                setAnalyzedData(prev => {
+                    const newPartners = [...(prev.partners || [])];
+                    if (!newPartners[pIdx]) newPartners[pIdx] = { name: "", score: Array(18).fill("") };
                     
-                    ["", d.date || "2024-01-01", d.time || "12:00", d.course || "알수없음", d.frontNineName || "전반", d.backNineName || "후반", 
-                     ...p.slice(0,9), sum(p,0,9), ...p.slice(9,18), sum(p,9,18), sum(p,0,18), ""],
-                     
-                    ["", "", "", "", "송봉근", "", 
-                     ...myS.slice(0,9), sumScoreAbs(p,myS,0,9), ...myS.slice(9,18), sumScoreAbs(p,myS,9,18), sumScoreAbs(p,myS,0,18), ""],
-                     
-                    ["", "", "", "", "", "Putts", ...putts.slice(0,9), sum(putts,0,9), ...putts.slice(9,18), sum(putts,9,18), sum(putts,0,18), ""],
-                    ["", "", "", "", "", "FW", ...mappedFw.slice(0,9), "", ...mappedFw.slice(9,18), "", "", ""],
-                    ["", "", "", "", "", "GIR", ...gir.slice(0,9), "", ...gir.slice(9,18), "", "", ""],
-                    ["", "", "", "", "", "U&D", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", ""],
-                    ["", "", "", "", "", "Panelty", ...mappedPen.slice(0,9), zeroToEmpty(sum(pen,0,9)), ...mappedPen.slice(9,18), zeroToEmpty(sum(pen,9,18)), zeroToEmpty(sum(pen,0,18)), ""],
-                    ["", "", "", "", "", "Bunker", ...mappedSand.slice(0,9), zeroToEmpty(sum(sand,0,9)), ...mappedSand.slice(9,18), zeroToEmpty(sum(sand,9,18)), zeroToEmpty(sum(sand,0,18)), ""]
-                ];
+                    if (key === 'name') {
+                        newPartners[pIdx].name = value;
+                    } else {
+                        const newScore = [...(newPartners[pIdx].score || Array(18).fill(""))];
+                        newScore[index] = value;
+                        newPartners[pIdx].score = newScore;
+                    }
+                    return { ...prev, partners: newPartners };
+                });
+            };
 
-                if (d.partners && Array.isArray(d.partners)) {
-                    d.partners.forEach(partner => {
-                        if(partner.name && partner.name !== "송봉근") {
-                            const pScore = safeArr(partner.score, 18, 0);
-                            wsData.push([
-                                "", "", "", "", partner.name, "", 
-                                ...pScore.slice(0,9), sumScoreAbs(p,pScore,0,9), 
-                                ...pScore.slice(9,18), sumScoreAbs(p,pScore,9,18), 
-                                sumScoreAbs(p,pScore,0,18), ""
-                            ]);
-                        }
+            const handleSaveToSheet = async () => {
+                setIsSaving(true);
+                setResultMsg("구글 시트에 데이터를 저장하고 있습니다...");
+                setErrorMsg("");
+
+                try {
+                    const response = await fetch(GAS_WEB_APP_URL, {
+                        method: "POST",
+                        redirect: "follow",
+                        headers: { "Content-Type": "text/plain;charset=utf-8" },
+                        body: JSON.stringify({ action: "save", data: analyzedData })
                     });
-                }
 
-                const ws = XLSX.utils.aoa_to_sheet(wsData);
-                
-                // 엑셀 열(Column) 너비 설정
-                const colWidths = [];
-                colWidths[0] = { wch: 5 };   // A: No
-                colWidths[1] = { wch: 12 };  // B: 일시
-                colWidths[2] = { wch: 8 };   // C: 시간
-                colWidths[3] = { wch: 18 };  // D: 구장
-                colWidths[4] = { wch: 10 };  // E: 이름
-                colWidths[5] = { wch: 10 };  // F: 세부
-                
-                for (let i = 6; i <= 26; i++) {
-                    colWidths[i] = { wch: 4 };
-                }
-                
-                colWidths[27] = { wch: 10 }; // AB: 상대
-                ws['!cols'] = colWidths; 
+                    const result = await response.json();
 
-                const wb = XLSX.utils.book_new();
-                XLSX.utils.book_append_sheet(wb, ws, "Raw");
-                XLSX.writeFile(wb, `AI_스코어추출_${d.date || 'New'}.xlsx`);
+                    if (result.success) {
+                        alert(`성공적으로 저장되었습니다!\n${result.message}`);
+                        window.location.reload(); 
+                    } else {
+                        throw new Error(result.error);
+                    }
+                } catch (err) {
+                    console.error(err);
+                    setErrorMsg(`저장 실패: ${err.message}`);
+                    setResultMsg("");
+                    setIsSaving(false);
+                }
             };
 
             return (
-                <div className="animate-fade-in p-2 md:p-8 max-w-4xl mx-auto pb-20">
+                <div className="animate-fade-in p-2 md:p-8 max-w-6xl mx-auto pb-20">
                     <div className="bg-white rounded-3xl shadow-sm border border-gray-100 overflow-hidden relative">
-                        
                         <div className="bg-gradient-to-br from-emerald-600 to-teal-800 p-6 md:p-8 text-white relative overflow-hidden">
-                            <div className="absolute top-0 right-0 w-64 h-64 bg-white/10 rounded-full blur-3xl -translate-y-1/2 translate-x-1/3"></div>
                             <div className="relative z-10">
                                 <h2 className="text-xl md:text-2xl font-black mb-2 flex items-center gap-2">
                                     <LucideIcon name="sparkles" className="w-6 h-6 text-emerald-300" />
-                                    AI 스코어 자동 분석기
+                                    AI 스코어 분석 및 자동 기록
                                 </h2>
                                 <p className="text-emerald-100 text-[13px] md:text-sm opacity-90 max-w-lg leading-relaxed">
-                                    스마트스코어 사진을 올리면 10초 만에 AI가 분석하여 구글 시트 양식에 딱 맞는 엑셀 파일로 변환합니다.
+                                    사진을 업로드하면 AI가 분석한 후, 검수를 거쳐 구글 시트에 기존 수식을 유지하며 즉시 자동 저장됩니다.
                                 </p>
                             </div>
                         </div>
@@ -308,11 +241,8 @@
                                         <img src={previews.summary} alt="Summary" className="w-full h-full object-contain max-h-48 rounded-lg" />
                                     ) : (
                                         <>
-                                            <div className="w-14 h-14 bg-white shadow-sm rounded-full flex items-center justify-center mb-3 group-hover:scale-110 transition-transform">
-                                                <LucideIcon name="image" className="w-6 h-6 text-gray-400 group-hover:text-emerald-500" />
-                                            </div>
+                                            <LucideIcon name="image" className="w-8 h-8 text-gray-400 group-hover:text-emerald-500 mb-2" />
                                             <h4 className="font-bold text-gray-700 text-sm mb-1">1. 스코어 요약 사진 (필수)</h4>
-                                            <p className="text-xs text-gray-400">구장명, 동반자 점수가 포함된 사진</p>
                                         </>
                                     )}
                                 </div>
@@ -323,11 +253,8 @@
                                         <img src={previews.details} alt="Details" className="w-full h-full object-contain max-h-48 rounded-lg" />
                                     ) : (
                                         <>
-                                            <div className="w-14 h-14 bg-white shadow-sm rounded-full flex items-center justify-center mb-3 group-hover:scale-110 transition-transform">
-                                                <LucideIcon name="image-plus" className="w-6 h-6 text-gray-400 group-hover:text-emerald-500" />
-                                            </div>
+                                            <LucideIcon name="image-plus" className="w-8 h-8 text-gray-400 group-hover:text-emerald-500 mb-2" />
                                             <h4 className="font-bold text-gray-700 text-sm mb-1">2. 세부 기록 사진 (선택)</h4>
-                                            <p className="text-xs text-gray-400">퍼트, F/W, GIR 등이 포함된 사진</p>
                                         </>
                                     )}
                                 </div>
@@ -341,38 +268,143 @@
                             )}
                             
                             {resultMsg && !errorMsg && (
-                                <div className={`p-4 rounded-xl text-[13px] md:text-sm font-bold flex items-center gap-2 border ${isAnalyzing ? 'bg-blue-50 text-blue-600 border-blue-100' : 'bg-emerald-50 text-emerald-600 border-emerald-100'}`}>
-                                    {isAnalyzing ? <LucideIcon name="loader-2" className="w-5 h-5 shrink-0 animate-spin" /> : <LucideIcon name="check-circle" className="w-5 h-5 shrink-0" />}
+                                <div className={`p-4 rounded-xl text-[13px] md:text-sm font-bold flex items-center gap-2 border ${isAnalyzing || isSaving ? 'bg-blue-50 text-blue-600 border-blue-100' : 'bg-emerald-50 text-emerald-600 border-emerald-100'}`}>
+                                    {(isAnalyzing || isSaving) ? <LucideIcon name="loader-2" className="w-5 h-5 shrink-0 animate-spin" /> : <LucideIcon name="edit-3" className="w-5 h-5 shrink-0" />}
                                     {resultMsg}
                                 </div>
                             )}
 
-                            <div className="pt-2 space-y-3">
-                                <button 
-                                    onClick={handleAnalyze} 
-                                    disabled={isAnalyzing}
-                                    className={`w-full py-4 rounded-xl font-black text-lg flex justify-center items-center gap-2 transition-all shadow-md ${isAnalyzing ? 'bg-gray-200 text-gray-400 cursor-not-allowed' : 'bg-gray-900 hover:bg-gray-800 text-white hover:shadow-lg'}`}
-                                >
-                                    {isAnalyzing ? (
-                                        <>분석 중입니다...</>
-                                    ) : (
-                                        <>
-                                            <LucideIcon name="bot" className="w-5 h-5" />
-                                            AI 분석 및 엑셀 다운로드
-                                        </>
-                                    )}
-                                </button>
+                            {!analyzedData && (
+                                <div className="flex flex-col gap-3 mt-6">
+                                    <button onClick={handleAnalyze} disabled={isAnalyzing} className={`w-full py-4 rounded-xl font-black text-lg flex justify-center items-center gap-2 transition-all shadow-md ${isAnalyzing ? 'bg-gray-200 text-gray-400 cursor-not-allowed' : 'bg-gray-900 hover:bg-gray-800 text-white hover:shadow-lg'}`}>
+                                        <LucideIcon name="bot" className="w-5 h-5" />
+                                        AI 데이터 추출 시작
+                                    </button>
+                                    <button onClick={handleManualInput} disabled={isAnalyzing} className={`w-full py-4 rounded-xl font-bold text-lg flex justify-center items-center gap-2 transition-all border-2 ${isAnalyzing ? 'border-gray-200 text-gray-400 cursor-not-allowed' : 'border-gray-200 bg-white hover:bg-gray-50 text-gray-700 hover:border-gray-300'}`}>
+                                        <LucideIcon name="edit-3" className="w-5 h-5" />
+                                        직접 입력 (수동 기록)
+                                    </button>
+                                </div>
+                            )}
 
-                                <a 
-                                    href="https://docs.google.com/spreadsheets/d/1fH5iCTpsHwJbHG7Qh7Rot5zNfqB05DYfKbu2gStFD7g/edit" 
-                                    target="_blank" 
-                                    rel="noopener noreferrer"
-                                    className="w-full py-3.5 rounded-xl font-bold text-[15px] text-emerald-700 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 flex justify-center items-center gap-2 transition-all"
-                                >
-                                    <LucideIcon name="external-link" className="w-5 h-5" />
-                                    내 구글 시트 열기 (데이터 붙여넣기)
-                                </a>
-                            </div>
+                            {analyzedData && (
+                                <div className="mt-8 animate-fade-in space-y-4 border-t border-gray-100 pt-6">
+                                    
+                                    {/* 상단 2단 기본 정보 영역 */}
+                                    <div className="flex flex-col gap-3 mb-4 bg-gray-50 p-4 rounded-lg border border-gray-200">
+                                        <div className="flex flex-wrap items-center gap-4">
+                                            <div className="flex items-center gap-2">
+                                                <span className="text-sm font-bold text-gray-600 w-10">일시:</span>
+                                                <input type="text" value={analyzedData.date || ""} onChange={(e) => setAnalyzedData({...analyzedData, date: e.target.value})} className="border p-1.5 rounded-md text-sm font-medium w-36 outline-none focus:border-emerald-500" placeholder="YYYY-MM-DD" />
+                                            </div>
+                                            <div className="flex items-center gap-2">
+                                                <span className="text-sm font-bold text-gray-600">시간:</span>
+                                                <input type="text" value={analyzedData.time || ""} onChange={(e) => setAnalyzedData({...analyzedData, time: e.target.value})} className="border p-1.5 rounded-md text-sm font-medium w-24 outline-none focus:border-emerald-500" placeholder="HH:MM" />
+                                            </div>
+                                            <div className="flex items-center gap-2">
+                                                <span className="text-sm font-bold text-gray-600">구장:</span>
+                                                <input type="text" value={analyzedData.course || ""} onChange={(e) => setAnalyzedData({...analyzedData, course: e.target.value})} className="border p-1.5 rounded-md text-sm font-medium w-48 outline-none focus:border-emerald-500" />
+                                            </div>
+                                        </div>
+                                        <div className="flex flex-wrap items-center gap-4 pt-1">
+                                            <div className="flex items-center gap-2">
+                                                <span className="text-sm font-bold text-gray-600 w-16">전반코스:</span>
+                                                <input type="text" value={analyzedData.frontNineName || ""} onChange={(e) => setAnalyzedData({...analyzedData, frontNineName: e.target.value})} className="border p-1.5 rounded-md text-sm font-medium w-32 outline-none focus:border-emerald-500" />
+                                            </div>
+                                            <div className="flex items-center gap-2">
+                                                <span className="text-sm font-bold text-gray-600 w-16">후반코스:</span>
+                                                <input type="text" value={analyzedData.backNineName || ""} onChange={(e) => setAnalyzedData({...analyzedData, backNineName: e.target.value})} className="border p-1.5 rounded-md text-sm font-medium w-32 outline-none focus:border-emerald-500" />
+                                            </div>
+                                        </div>
+                                    </div>
+
+                                    {/* 스코어 테이블 검수 영역 (전체 테두리 균일화 적용) */}
+                                    <div className="overflow-x-auto rounded-xl border border-gray-200 shadow-sm">
+                                        <table className="w-full text-center text-xs whitespace-nowrap">
+                                            <thead className="bg-slate-50 text-slate-500 uppercase tracking-wider">
+                                                <tr>
+                                                    <th rowSpan="2" className="p-2 border-r border-b w-20 align-middle">구분</th>
+                                                    <th colSpan="9" className="p-1.5 border-r border-b bg-gray-100 text-gray-600 font-bold">전반</th>
+                                                    <th colSpan="9" className="p-1.5 border-b bg-gray-100 text-gray-600 font-bold">후반</th>
+                                                </tr>
+                                                <tr>
+                                                    {[1,2,3,4,5,6,7,8,9, 1,2,3,4,5,6,7,8,9].map((h, i) => (
+                                                        <th key={i} className="p-2 border-r border-b w-10 bg-white">{h}</th>
+                                                    ))}
+                                                </tr>
+                                            </thead>
+                                            <tbody>
+                                                <tr>
+                                                    <td className="p-2 border-r border-b font-bold bg-slate-100 text-gray-600">Par</td>
+                                                    {analyzedData.par?.map((val, i) => (
+                                                        <td key={i} className="p-1 border-r border-b"><input type="text" value={val || ""} onChange={(e) => handleArrayChange('par', i, e.target.value)} className="w-full py-1 text-center bg-transparent outline-none font-medium" /></td>
+                                                    ))}
+                                                </tr>
+                                                <tr>
+                                                    <td className="p-2 border-r border-b font-bold bg-blue-50 text-blue-600">타수</td>
+                                                    {analyzedData.myScore?.map((val, i) => (
+                                                        <td key={i} className="p-1 border-r border-b bg-blue-50/30"><input type="text" value={val || ""} onChange={(e) => handleArrayChange('myScore', i, e.target.value)} className="w-full py-1 text-center bg-transparent outline-none font-bold text-blue-700" /></td>
+                                                    ))}
+                                                </tr>
+                                                <tr>
+                                                    <td className="p-2 border-r border-b font-bold text-gray-600">퍼트</td>
+                                                    {analyzedData.putts?.map((val, i) => (
+                                                        <td key={i} className="p-1 border-r border-b"><input type="text" value={val || ""} onChange={(e) => handleArrayChange('putts', i, e.target.value)} className="w-full py-1 text-center bg-transparent outline-none font-medium" /></td>
+                                                    ))}
+                                                </tr>
+                                                <tr>
+                                                    <td className="p-2 border-r border-b font-bold text-gray-600">F/W</td>
+                                                    {analyzedData.fw?.map((val, i) => (
+                                                        <td key={i} className="p-1 border-r border-b"><input type="text" value={val || ""} onChange={(e) => handleArrayChange('fw', i, e.target.value)} className="w-full py-1 text-center bg-transparent outline-none font-bold text-emerald-600" maxLength={1} /></td>
+                                                    ))}
+                                                </tr>
+                                                <tr>
+                                                    <td className="p-2 border-r border-b font-bold text-gray-600">벌타</td>
+                                                    {analyzedData.penalty?.map((val, i) => (
+                                                        <td key={i} className="p-1 border-r border-b"><input type="text" value={val || ""} onChange={(e) => handleArrayChange('penalty', i, e.target.value)} className="w-full py-1 text-center bg-transparent outline-none font-bold text-red-500" /></td>
+                                                    ))}
+                                                </tr>
+                                                <tr>
+                                                    <td className="p-2 border-r border-b font-bold text-gray-600">벙커</td>
+                                                    {analyzedData.sand?.map((val, i) => (
+                                                        <td key={i} className="p-1 border-r border-b"><input type="text" value={val || ""} onChange={(e) => handleArrayChange('sand', i, e.target.value)} className="w-full py-1 text-center bg-transparent outline-none font-bold text-yellow-600" /></td>
+                                                    ))}
+                                                </tr>
+                                                
+                                                {/* 기본 3줄 동반자 테이블 렌더링 (행 높이 일치) */}
+                                                {analyzedData.partners?.map((partner, pIdx) => (
+                                                    <tr key={`partner-${pIdx}`}>
+                                                        <td className="p-2 border-r border-b font-bold bg-indigo-50 text-indigo-700">
+                                                            <input type="text" value={partner.name || ""} onChange={(e) => handlePartnerChange(pIdx, 'name', null, e.target.value)} className="w-full py-1 text-center bg-transparent outline-none font-bold placeholder-indigo-300" placeholder={`동반자 ${pIdx + 1}`} />
+                                                        </td>
+                                                        {partner.score?.map((val, i) => (
+                                                            <td key={`p-${pIdx}-${i}`} className="p-1 border-r border-b bg-indigo-50/30">
+                                                                <input type="text" value={val || ""} onChange={(e) => handlePartnerChange(pIdx, 'score', i, e.target.value)} className="w-full py-1 text-center bg-transparent outline-none font-bold text-indigo-700" />
+                                                            </td>
+                                                        ))}
+                                                    </tr>
+                                                ))}
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                    
+                                    <div className="flex justify-between items-center mt-2">
+                                        <p className="text-xs text-gray-400 flex items-center gap-1">
+                                            <LucideIcon name="info" className="w-4 h-4" />
+                                            테이블 내 항목을 클릭하여 직접 수정 및 입력할 수 있습니다. 
+                                        </p>
+                                    </div>
+
+                                    <button onClick={handleSaveToSheet} disabled={isSaving} className={`w-full py-4 mt-6 rounded-xl font-black text-lg flex justify-center items-center gap-2 transition-all shadow-md ${isSaving ? 'bg-emerald-200 text-emerald-600 cursor-not-allowed' : 'bg-emerald-600 hover:bg-emerald-500 text-white hover:shadow-lg'}`}>
+                                        {isSaving ? "저장 중..." : (
+                                            <>
+                                                <LucideIcon name="save" className="w-5 h-5" />
+                                                구글 시트에 즉시 자동 기록하기
+                                            </>
+                                        )}
+                                    </button>
+                                </div>
+                            )}
                         </div>
                     </div>
                 </div>
