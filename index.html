@@ -129,7 +129,7 @@
         };
 
     const AIVisionUploadTab = () => {
-            // ↓↓↓ 여기에 현재 사용 중이신 GAS 웹 앱 URL을 다시 넣어주세요 ↓↓↓
+            // ↓↓↓ 여기에 현재 사용 중이신 GAS 웹 앱 URL을 반드시 다시 넣어주세요 ↓↓↓
             const GAS_WEB_APP_URL = "여기에_배포된_GAS_웹앱_URL_입력";
             // ↑↑↑================================================================↑↑↑
 
@@ -161,14 +161,14 @@
                 reader.onerror = error => reject(error);
             });
 
-            // AI 분석 요청 핸들러 (기존 로직 유지, JSON 파싱 에러 방지 강화)
+            // ★ AI 분석 로직은 가장 잘 작동했던 이전 버전으로 완벽히 원복했습니다.
             const handleAnalyze = async () => {
                 if (!images.summary) {
                     setErrorMsg("스코어카드 요약 사진은 필수입니다.");
                     return;
                 }
                 setIsAnalyzing(true);
-                setResultMsg("AI가 이미지를 판독하고 있습니다... (약 10~15초 소요)");
+                setResultMsg("AI가 이미지를 판독하고 있습니다... (약 10초 소요)");
                 setErrorMsg("");
                 setAnalyzedData(null);
 
@@ -188,14 +188,7 @@
                         body: JSON.stringify({ action: "analyze", images: payloadImages })
                     });
 
-                    // JSON 파싱 전 텍스트로 먼저 받아 오류 방지
-                    const textResult = await response.text();
-                    
-                    if (!textResult) {
-                        throw new Error("서버로부터 응답이 없습니다.");
-                    }
-
-                    const result = JSON.parse(textResult);
+                    const result = await response.json();
 
                     if (result.success) {
                         const parsedData = result.data;
@@ -207,7 +200,7 @@
                         setAnalyzedData(parsedData); 
                         setResultMsg("✅ 분석 완료! 아래 테이블을 검수 및 수정 후 저장해주세요.");
                     } else {
-                        throw new Error(result.error || "분석 중 오류가 발생했습니다.");
+                        throw new Error(result.error);
                     }
                 } catch (err) {
                     console.error(err);
@@ -238,7 +231,7 @@
                 setErrorMsg("");
             };
 
-            // ★ 전/후반 스코어 스왑 로직 
+            // ★ 새롭게 추가된 전/후반 스왑 기능
             const handleSwapNines = () => {
                 if (!confirm("전반 코스와 후반 코스의 모든 기록을 서로 바꾸시겠습니까?")) return;
                 
