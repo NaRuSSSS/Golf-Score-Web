@@ -61,6 +61,73 @@
             return <span ref={ref} className="contents" dangerouslySetInnerHTML={{ __html: `<i data-lucide="${name}" class="${className}"></i>` }} />;
         };
 
+        const SearchableSelect = ({ options, value, onChange, placeholder, triggerClassName, dropdownColor }) => {
+            const { useState, useRef, useEffect } = React;
+            const [isOpen, setIsOpen] = useState(false);
+            const [search, setSearch] = useState("");
+            const wrapperRef = useRef(null);
+        
+            useEffect(() => {
+                const handleClickOutside = (event) => {
+                    if (wrapperRef.current && !wrapperRef.current.contains(event.target)) setIsOpen(false);
+                };
+                document.addEventListener("mousedown", handleClickOutside);
+                return () => document.removeEventListener("mousedown", handleClickOutside);
+            }, []);
+        
+            const filteredOptions = options.filter(opt => opt.label.toLowerCase().includes(search.toLowerCase()));
+        
+            const bgHover = dropdownColor === 'emerald' ? 'hover:bg-emerald-50' : 'hover:bg-indigo-50';
+            const bgActive = dropdownColor === 'emerald' ? 'bg-emerald-50 text-emerald-700' : 'bg-indigo-50 text-indigo-700';
+            const ringFocus = dropdownColor === 'emerald' ? 'focus:ring-emerald-500 focus:border-emerald-500' : 'focus:ring-indigo-500 focus:border-indigo-500';
+        
+            return (
+                <div className="relative w-full" ref={wrapperRef}>
+                    <div className={triggerClassName} onClick={() => setIsOpen(!isOpen)}>
+                        <span className="truncate">{options.find(o => o.value === value)?.label || placeholder}</span>
+                        <LucideIcon name={isOpen ? "chevron-up" : "chevron-down"} className="w-5 h-5 opacity-50 shrink-0" />
+                    </div>
+                    {isOpen && (
+                        <div className="absolute z-50 w-full mt-1 bg-white border border-gray-200 rounded-xl shadow-lg max-h-60 flex flex-col overflow-hidden">
+                            <div className="p-2 border-b border-gray-100 bg-gray-50/50">
+                                <div className="relative">
+                                    <LucideIcon name="search" className="w-4 h-4 text-gray-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                                    <input 
+                                        type="text" 
+                                        className={`w-full pl-9 pr-3 py-2 bg-white border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-1 ${ringFocus}`}
+                                        placeholder="검색어 입력..."
+                                        value={search}
+                                        onChange={(e) => setSearch(e.target.value)}
+                                        onClick={(e) => e.stopPropagation()}
+                                    />
+                                </div>
+                            </div>
+                            <ul className="overflow-y-auto custom-scrollbar flex-1 py-1">
+                                {filteredOptions.length > 0 ? (
+                                    filteredOptions.map((opt, idx) => (
+                                        <li 
+                                            key={idx}
+                                            className={`px-4 py-2.5 text-sm cursor-pointer flex items-center justify-between transition-colors ${value === opt.value ? `${bgActive} font-bold` : `text-gray-700 ${bgHover}`}`}
+                                            onClick={() => {
+                                                onChange(opt.value);
+                                                setIsOpen(false);
+                                                setSearch("");
+                                            }}
+                                        >
+                                            <span className="truncate">{opt.label}</span>
+                                            {value === opt.value && <LucideIcon name="check" className={`w-4 h-4 ${dropdownColor === 'emerald' ? 'text-emerald-600' : 'text-indigo-600'}`} />}
+                                        </li>
+                                    ))
+                                ) : (
+                                    <li className="p-4 text-center text-sm text-gray-500">검색 결과가 없습니다.</li>
+                                )}
+                            </ul>
+                        </div>
+                    )}
+                </div>
+            );
+        };
+
         const AIVisionUploadTab = () => {
             // ↓↓↓ 여기에 현재 사용 중이신 GAS 웹 앱 URL을 다시 넣어주세요 ↓↓↓
             const GAS_WEB_APP_URL = "https://script.google.com/macros/s/AKfycbzOzL3J9Sr04gFroynWgj4XZxt4zH3VmFTbiFn4NpdrWOekg3eJWQojnBimkmSQy2qhCw/exec";
@@ -641,10 +708,10 @@
                         cur.frontHalf.ud = processPerc(frontTotal);
                         cur.backHalf.ud = processPerc(backTotal);
                         for(let k=0; k<9; k++) {
-                            cur.holes[k].ud = String(row[colDetail + 1 + k] || '').trim();
-                            cur.holes[k+9].ud = String(row[colDetail + 11 + k] || '').trim();
+                            cur.holes[k].ud = processYN(row[colDetail + 1 + k]);
+                            cur.holes[k+9].ud = processYN(row[colDetail + 11 + k]);
                         }
-                    } 
+                    }
                     else if (gVal === 'Panelty') {
                         cur.penalties = totalNum;
                         cur.frontHalf.penalties = frontTotal;
@@ -721,13 +788,12 @@
                         </nav>
                         
                         <div className="absolute bottom-8 left-0 right-0 px-6">
-                            <label className="flex items-center justify-center gap-2 w-full bg-slate-800 hover:bg-slate-700 text-sm py-3 rounded-xl cursor-pointer transition-colors border border-slate-700 shadow-sm">
-                                <LucideIcon name="upload" className="w-4 h-4" />
-                                <span>엑셀 데이터 업로드</span>
-                                <input type="file" className="hidden" accept=".xlsx, .xls" onChange={handleFileUpload} />
-                            </label>
-                            <p className="text-xs text-center text-slate-500 mt-3 flex items-center justify-center gap-1">
-                                <span className="w-2 h-2 rounded-full bg-emerald-500"></span> Google Sheets 연동 중
+                            <p className="text-xs text-center text-slate-400 flex items-center justify-center gap-1.5">
+                                <span className="relative flex h-2 w-2">
+                                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                                  <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
+                                </span>
+                                Google Sheets 연동 중
                             </p>
                         </div>
                     </div>
@@ -1142,6 +1208,7 @@
                                                 <th className="px-1 sm:px-3 py-3 text-center font-semibold whitespace-nowrap">스코어</th>
                                                 <th className="px-1 sm:px-2 py-3 text-center font-semibold whitespace-nowrap">F/W</th>
                                                 <th className="px-1 sm:px-2 py-3 text-center font-semibold whitespace-nowrap">GIR</th>
+                                                <th className="px-1 sm:px-2 py-3 text-center font-semibold whitespace-nowrap">U/D</th>
                                                 <th className="px-1 sm:px-2 py-3 text-center font-semibold whitespace-nowrap">퍼트</th>
                                                 <th className="px-1 sm:px-2 py-3 text-center font-semibold whitespace-nowrap">벌타</th>
                                                 <th className="px-1 sm:px-2 py-3 text-center font-semibold whitespace-nowrap">벙커</th>
@@ -1161,6 +1228,7 @@
                                                         <td className="px-1 sm:px-3 py-3 text-center font-black text-blue-600 text-sm whitespace-nowrap">{row.score}</td>
                                                         <td className="px-1 sm:px-2 py-3 text-center text-[10px] sm:text-xs text-gray-500 whitespace-nowrap">{row.fwHit}%</td>
                                                         <td className="px-1 sm:px-2 py-3 text-center text-[10px] sm:text-xs text-gray-500 whitespace-nowrap">{row.gir}%</td>
+                                                        <td className="px-1 sm:px-2 py-3 text-center text-[10px] sm:text-xs text-gray-500 whitespace-nowrap">{row.ud}%</td>
                                                         <td className="px-1 sm:px-2 py-3 text-center text-[10px] sm:text-xs text-gray-600 font-medium whitespace-nowrap">{row.putts}</td>
                                                         <td className="px-1 sm:px-2 py-3 text-center text-[10px] sm:text-xs font-bold text-red-400 whitespace-nowrap">{row.penalties}</td>
                                                         <td className="px-1 sm:px-2 py-3 text-center text-[10px] sm:text-xs font-bold text-yellow-500 whitespace-nowrap">{row.bunkerShots}</td>
@@ -1179,12 +1247,13 @@
                                                                 <td className="px-3 py-2 text-center font-bold text-blue-500">{row.frontHalf?.score}</td>
                                                                 <td className="px-2 py-2 text-center text-gray-400">{row.frontHalf?.fwHit}%</td>
                                                                 <td className="px-2 py-2 text-center text-gray-400">{row.frontHalf?.gir}%</td>
+                                                                <td className="px-2 py-2 text-center text-gray-400">{row.frontHalf?.ud}%</td>
                                                                 <td className="px-2 py-2 text-center text-gray-500">{row.frontHalf?.putts}</td>
                                                                 <td className="px-2 py-2 text-center text-red-300">{row.frontHalf?.penalties}</td>
                                                                 <td className="px-2 py-2 text-center text-yellow-400">{row.frontHalf?.bunkerShots}</td>
                                                             </tr>
                                                             {expandedHalves[`${idx}-front`] && (
-                                                                <tr><td colSpan={8} className="p-4 bg-gray-100/50"><HoleTable holes={row.holes?.slice(0, 9) || []} /></td></tr>
+                                                                <tr><td colSpan={9} className="p-4 bg-gray-100/50"><HoleTable holes={row.holes?.slice(0, 9) || []} /></td></tr>
                                                             )}
 
                                                             <tr className="bg-slate-50 text-xs border-b border-gray-100">
@@ -1198,12 +1267,13 @@
                                                                 <td className="px-3 py-2 text-center font-bold text-blue-500">{row.backHalf?.score}</td>
                                                                 <td className="px-2 py-2 text-center text-gray-400">{row.backHalf?.fwHit}%</td>
                                                                 <td className="px-2 py-2 text-center text-gray-400">{row.backHalf?.gir}%</td>
+                                                                <td className="px-2 py-2 text-center text-gray-400">{row.backHalf?.ud}%</td>
                                                                 <td className="px-2 py-2 text-center text-gray-500">{row.backHalf?.putts}</td>
                                                                 <td className="px-2 py-2 text-center text-red-300">{row.backHalf?.penalties}</td>
                                                                 <td className="px-2 py-2 text-center text-yellow-400">{row.backHalf?.bunkerShots}</td>
                                                             </tr>
                                                             {expandedHalves[`${idx}-back`] && (
-                                                                <tr><td colSpan={8} className="p-4 bg-gray-100/50"><HoleTable holes={row.holes?.slice(9, 18) || []} /></td></tr>
+                                                                <tr><td colSpan={9} className="p-4 bg-gray-100/50"><HoleTable holes={row.holes?.slice(9, 18) || []} /></td></tr>
                                                             )}
                                                         </>
                                                     )}
@@ -1489,13 +1559,14 @@
                                 </div>
                                 <h3 className="text-base font-bold text-gray-800">분석할 구장 선택</h3>
                             </div>
-                            <select 
-                                className="w-full border-2 border-gray-200 rounded-xl px-3 py-1.5 font-bold text-gray-800 text-base focus:ring-emerald-500 focus:border-emerald-500 outline-none bg-gray-50 hover:bg-white transition-colors cursor-pointer"
+                            <SearchableSelect 
+                                options={courseCounts.map(c => ({ value: c.name, label: `${c.name} (${c.count}회 플레이)` }))}
                                 value={selectedCourse}
-                                onChange={(e) => setSelectedCourse(e.target.value)}
-                            >
-                                {courseCounts.map(c => <option key={c.name} value={c.name}>{c.name} ({c.count}회 플레이)</option>)}
-                            </select>
+                                onChange={setSelectedCourse}
+                                placeholder="구장을 검색하세요"
+                                triggerClassName="w-full border-2 border-gray-200 rounded-xl px-4 py-2.5 font-bold text-gray-800 text-base bg-gray-50 hover:bg-white transition-colors cursor-pointer flex justify-between items-center"
+                                dropdownColor="emerald"
+                            />
                             
                             <div className="grid grid-cols-3 md:grid-cols-6 gap-2 mt-1">
                                 <div className="bg-blue-50 rounded-lg py-2 px-1 border border-blue-100 text-center flex flex-col justify-center">
@@ -1725,6 +1796,7 @@
                                         <th className="px-2 sm:px-5 py-3 text-center font-semibold whitespace-nowrap">스코어</th>
                                         <th className="px-1 sm:px-4 py-3 text-center font-semibold whitespace-nowrap">F/W</th>
                                         <th className="px-1 sm:px-4 py-3 text-center font-semibold whitespace-nowrap">GIR</th>
+                                        <th className="px-1 sm:px-4 py-3 text-center font-semibold whitespace-nowrap">U/D</th>
                                         <th className="px-1 sm:px-4 py-3 text-center font-semibold whitespace-nowrap">퍼트</th>
                                         <th className="px-1 sm:px-3 py-3 text-center font-semibold whitespace-nowrap">벌타</th>
                                         <th className="px-1 sm:px-3 py-3 text-center font-semibold whitespace-nowrap">벙커</th>
@@ -1743,11 +1815,12 @@
                                                 <td className="px-2 sm:px-5 py-3 text-center font-black text-blue-600 text-sm sm:text-base whitespace-nowrap">{row.score}</td>
                                                 <td className="px-1 sm:px-4 py-3 text-center text-[10px] sm:text-xs text-gray-500 whitespace-nowrap">{row.fwHit}%</td>
                                                 <td className="px-1 sm:px-4 py-3 text-center text-[10px] sm:text-xs text-gray-500 whitespace-nowrap">{row.gir}%</td>
+                                                <td className="px-1 sm:px-4 py-3 text-center text-[10px] sm:text-xs text-gray-500 whitespace-nowrap">{row.ud}%</td>
                                                 <td className="px-1 sm:px-4 py-3 text-center text-[10px] sm:text-xs text-gray-600 font-medium whitespace-nowrap">{row.putts}</td>
                                                 <td className="px-1 sm:px-3 py-3 text-center text-[10px] sm:text-xs font-bold text-red-400 whitespace-nowrap">{row.penalties}</td>
                                                 <td className="px-1 sm:px-3 py-3 text-center text-[10px] sm:text-xs font-bold text-yellow-500 whitespace-nowrap">{row.bunkerShots}</td>
                                             </tr>
-
+                            
                                             {expandedRounds[idx] && (
                                                 <>
                                                     <tr className="bg-slate-50 text-xs border-b border-gray-100">
@@ -1761,14 +1834,15 @@
                                                         <td className="px-5 py-2 text-center font-bold text-blue-500">{row.frontHalf?.score}</td>
                                                         <td className="px-4 py-2 text-center text-gray-400">{row.frontHalf?.fwHit}%</td>
                                                         <td className="px-4 py-2 text-center text-gray-400">{row.frontHalf?.gir}%</td>
+                                                        <td className="px-4 py-2 text-center text-gray-400">{row.frontHalf?.ud}%</td>
                                                         <td className="px-4 py-2 text-center text-gray-500">{row.frontHalf?.putts}</td>
                                                         <td className="px-3 py-2 text-center text-red-300">{row.frontHalf?.penalties}</td>
                                                         <td className="px-3 py-2 text-center text-yellow-400">{row.frontHalf?.bunkerShots}</td>
                                                     </tr>
                                                     {expandedHalves[`${idx}-front`] && (
-                                                        <tr><td colSpan={7} className="p-4 bg-gray-100/50"><HoleTable holes={row.holes?.slice(0, 9) || []} /></td></tr>
+                                                        <tr><td colSpan={8} className="p-4 bg-gray-100/50"><HoleTable holes={row.holes?.slice(0, 9) || []} /></td></tr>
                                                     )}
-
+                            
                                                     <tr className="bg-slate-50 text-xs border-b border-gray-100">
                                                         <td className="px-5 py-2 pl-12 flex items-center gap-2">
                                                             <button onClick={() => toggleHalf(idx, 'back')} className="p-0.5 rounded bg-white border border-gray-300 text-gray-400">
@@ -1780,12 +1854,13 @@
                                                         <td className="px-5 py-2 text-center font-bold text-blue-500">{row.backHalf?.score}</td>
                                                         <td className="px-4 py-2 text-center text-gray-400">{row.backHalf?.fwHit}%</td>
                                                         <td className="px-4 py-2 text-center text-gray-400">{row.backHalf?.gir}%</td>
+                                                        <td className="px-4 py-2 text-center text-gray-400">{row.backHalf?.ud}%</td>
                                                         <td className="px-4 py-2 text-center text-gray-500">{row.backHalf?.putts}</td>
                                                         <td className="px-3 py-2 text-center text-red-300">{row.backHalf?.penalties}</td>
                                                         <td className="px-3 py-2 text-center text-yellow-400">{row.backHalf?.bunkerShots}</td>
                                                     </tr>
                                                     {expandedHalves[`${idx}-back`] && (
-                                                        <tr><td colSpan={7} className="p-4 bg-gray-100/50"><HoleTable holes={row.holes?.slice(9, 18) || []} /></td></tr>
+                                                        <tr><td colSpan={8} className="p-4 bg-gray-100/50"><HoleTable holes={row.holes?.slice(9, 18) || []} /></td></tr>
                                                     )}
                                                 </>
                                             )}
@@ -1862,13 +1937,14 @@
                                 <LucideIcon name="user-search" className="w-6 h-6" />
                             </div>
                             <label className="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">동반자 선택</label>
-                            <select 
-                                className="w-full border-b-2 border-indigo-500 pb-2 text-xl font-black text-gray-800 text-center focus:outline-none bg-transparent cursor-pointer hover:bg-gray-50 rounded-t-lg transition-colors"
+                            <SearchableSelect 
+                                options={partnersCount.map(p => ({ value: p.name, label: `${p.name} (${p.count}회)` }))}
                                 value={selectedPartner}
-                                onChange={(e) => setSelectedPartner(e.target.value)}
-                            >
-                                {partnersCount.map(p => <option key={p.name} value={p.name}>{p.name} ({p.count}회)</option>)}
-                            </select>
+                                onChange={setSelectedPartner}
+                                placeholder="동반자를 검색하세요"
+                                triggerClassName="w-full border-b-2 border-indigo-500 pb-2 text-xl font-black text-gray-800 focus:outline-none bg-transparent cursor-pointer hover:bg-gray-50 rounded-t-lg transition-colors flex justify-center items-center gap-2"
+                                dropdownColor="indigo"
+                            />
                         </div>
 
                         {h2hData.matches.length > 0 && (
@@ -1986,6 +2062,14 @@
         };
 
         const HoleTable = ({ holes }) => {
+            // 수식 결과(1, 0, TRUE, FALSE 등)를 완벽하게 기호로 변환하는 헬퍼 함수
+            const renderYN = (val) => {
+                const v = String(val || '').trim().toUpperCase();
+                if (['Y', '1', 'TRUE', 'O'].includes(v)) return '✔';
+                if (['N', '0', 'FALSE', 'X'].includes(v)) return '-';
+                return val;
+            };
+
             return (
                 <div className="overflow-x-auto rounded-xl border border-gray-200 bg-white shadow-sm">
                     <table className="w-full text-center border-collapse">
@@ -2018,19 +2102,24 @@
                             </tr>
                             <tr>
                                 <td className="p-1 sm:p-1.5 border-r border-b text-slate-500 text-left pl-2 sm:pl-3 whitespace-nowrap">F/W</td>
-                                {holes.map((h, i) => (
-                                    <td key={`fw-${i}`} className={`p-1 sm:p-1.5 border-r border-b font-bold whitespace-nowrap ${h.fw==='Y'?'text-emerald-500':h.fw==='N'?'text-gray-300':''}`}>
-                                        {h.fw}
-                                    </td>
-                                ))}
+                                {holes.map((h, i) => {
+                                    const v = renderYN(h.fw);
+                                    return <td key={`fw-${i}`} className={`p-1 sm:p-1.5 border-r border-b font-bold text-[14px] whitespace-nowrap ${v==='✔'?'text-emerald-500':v==='-'?'text-gray-300':''}`}>{v}</td>
+                                })}
                             </tr>
                             <tr>
                                 <td className="p-1 sm:p-1.5 border-r border-b text-slate-500 text-left pl-2 sm:pl-3 whitespace-nowrap">GIR</td>
-                                {holes.map((h, i) => (
-                                    <td key={`g-${i}`} className={`p-1 sm:p-1.5 border-r border-b font-bold whitespace-nowrap ${h.gir==='Y'?'text-indigo-500':h.gir==='N'?'text-gray-300':''}`}>
-                                        {h.gir}
-                                    </td>
-                                ))}
+                                {holes.map((h, i) => {
+                                    const v = renderYN(h.gir);
+                                    return <td key={`g-${i}`} className={`p-1 sm:p-1.5 border-r border-b font-bold text-[14px] whitespace-nowrap ${v==='✔'?'text-indigo-500':v==='-'?'text-gray-300':''}`}>{v}</td>
+                                })}
+                            </tr>
+                            <tr>
+                                <td className="p-1 sm:p-1.5 border-r border-b text-slate-500 text-left pl-2 sm:pl-3 whitespace-nowrap">U/D</td>
+                                {holes.map((h, i) => {
+                                    const v = renderYN(h.ud);
+                                    return <td key={`ud-${i}`} className={`p-1 sm:p-1.5 border-r border-b font-bold text-[14px] whitespace-nowrap ${v==='✔'?'text-purple-500':v==='-'?'text-gray-300':''}`}>{v}</td>
+                                })}
                             </tr>
                             <tr>
                                 <td className="p-1 sm:p-1.5 border-r border-b text-slate-500 text-left pl-2 sm:pl-3 whitespace-nowrap">Penalty</td>
