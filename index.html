@@ -128,9 +128,9 @@
             );
         };
 
-        const AIVisionUploadTab = () => {
+const AIVisionUploadTab = () => {
             // ↓↓↓ 여기에 현재 사용 중이신 GAS 웹 앱 URL을 다시 넣어주세요 ↓↓↓
-            const GAS_WEB_APP_URL = "https://script.google.com/macros/s/AKfycbzOzL3J9Sr04gFroynWgj4XZxt4zH3VmFTbiFn4NpdrWOekg3eJWQojnBimkmSQy2qhCw/exec";
+            const GAS_WEB_APP_URL = "여기에_배포된_GAS_웹앱_URL_입력";
             // ↑↑↑================================================================↑↑↑
 
             const [images, setImages] = useState({ summary: null, details: null });
@@ -232,6 +232,44 @@
                 setErrorMsg("");
             };
 
+            // ★ [추가됨] 전/후반 스코어 전체 스왑 핸들러
+            const handleSwapNines = () => {
+                if (!confirm("전반 코스와 후반 코스의 모든 기록을 서로 바꾸시겠습니까?")) return;
+                
+                setAnalyzedData(prev => {
+                    if (!prev) return prev;
+
+                    // 18홀 배열의 전반(0~8)과 후반(9~17)을 뒤바꾸는 헬퍼 함수
+                    const swapArray = (arr) => {
+                        if (!arr || arr.length < 18) return Array(18).fill("");
+                        const newArr = [...arr];
+                        for (let i = 0; i < 9; i++) {
+                            const temp = newArr[i];
+                            newArr[i] = newArr[i + 9];
+                            newArr[i + 9] = temp;
+                        }
+                        return newArr;
+                    };
+
+                    return {
+                        ...prev,
+                        frontNineName: prev.backNineName || "",
+                        backNineName: prev.frontNineName || "",
+                        par: swapArray(prev.par),
+                        myScore: swapArray(prev.myScore),
+                        putts: swapArray(prev.putts),
+                        fw: swapArray(prev.fw),
+                        sand: swapArray(prev.sand),
+                        penalty: swapArray(prev.penalty),
+                        partners: (prev.partners || []).map(p => ({
+                            ...p,
+                            score: swapArray(p.score)
+                        }))
+                    };
+                });
+                setResultMsg("🔄 전반과 후반 코스 스코어가 성공적으로 교체되었습니다.");
+            };
+
             const handleArrayChange = (key, index, value) => {
                 setAnalyzedData(prev => {
                     const newArr = [...(prev[key] || Array(18).fill(""))];
@@ -284,6 +322,8 @@
                     setIsSaving(false);
                 }
             };
+
+            const getBorderClass = (i) => i === 8 ? 'border-r-2 border-gray-300' : 'border-r';
 
             return (
                 <div className="animate-fade-in p-2 md:p-8 max-w-6xl mx-auto pb-20">
@@ -357,7 +397,6 @@
                             {analyzedData && (
                                 <div className="mt-8 animate-fade-in space-y-4 border-t border-gray-100 pt-6">
                                     
-                                    {/* 상단 2단 기본 정보 영역 */}
                                     <div className="flex flex-col gap-3 mb-4 bg-gray-50 p-4 rounded-lg border border-gray-200">
                                         <div className="flex flex-wrap items-center gap-4">
                                             <div className="flex items-center gap-2">
@@ -385,7 +424,6 @@
                                         </div>
                                     </div>
 
-                                    {/* 스코어 테이블 검수 영역 (전체 테두리 균일화 적용) */}
                                     <div className="overflow-x-auto rounded-xl border border-gray-200 shadow-sm">
                                         <table className="w-full text-center text-xs whitespace-nowrap">
                                             <thead className="bg-slate-50 text-slate-500 uppercase tracking-wider">
@@ -438,7 +476,6 @@
                                                     ))}
                                                 </tr>
                                                 
-                                                {/* 기본 3줄 동반자 테이블 렌더링 (행 높이 일치) */}
                                                 {analyzedData.partners?.map((partner, pIdx) => (
                                                     <tr key={`partner-${pIdx}`}>
                                                         <td className="p-2 border-r border-b font-bold bg-indigo-50 text-indigo-700">
@@ -455,14 +492,19 @@
                                         </table>
                                     </div>
                                     
-                                    <div className="flex justify-between items-center mt-2">
+                                    {/* ★ [수정됨] 안내 문구와 스왑 버튼을 한 줄에 배치 */}
+                                    <div className="flex justify-between items-center mt-3 mb-1">
                                         <p className="text-xs text-gray-400 flex items-center gap-1">
                                             <LucideIcon name="info" className="w-4 h-4" />
                                             테이블 내 항목을 클릭하여 직접 수정 및 입력할 수 있습니다. 
                                         </p>
+                                        <button onClick={handleSwapNines} className="text-xs bg-orange-50 border border-orange-200 hover:bg-orange-100 text-orange-600 px-3 py-1.5 rounded-lg font-bold transition-colors flex items-center gap-1 shadow-sm">
+                                            <LucideIcon name="arrow-left-right" className="w-3.5 h-3.5" />
+                                            전/후반 스왑
+                                        </button>
                                     </div>
 
-                                    <button onClick={handleSaveToSheet} disabled={isSaving} className={`w-full py-4 mt-6 rounded-xl font-black text-lg flex justify-center items-center gap-2 transition-all shadow-md ${isSaving ? 'bg-emerald-200 text-emerald-600 cursor-not-allowed' : 'bg-emerald-600 hover:bg-emerald-500 text-white hover:shadow-lg'}`}>
+                                    <button onClick={handleSaveToSheet} disabled={isSaving} className={`w-full py-4 mt-4 rounded-xl font-black text-lg flex justify-center items-center gap-2 transition-all shadow-md ${isSaving ? 'bg-emerald-200 text-emerald-600 cursor-not-allowed' : 'bg-emerald-600 hover:bg-emerald-500 text-white hover:shadow-lg'}`}>
                                         {isSaving ? "저장 중..." : (
                                             <>
                                                 <LucideIcon name="save" className="w-5 h-5" />
