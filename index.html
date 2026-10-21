@@ -128,7 +128,7 @@
             );
         };
 
-const AIVisionUploadTab = () => {
+    const AIVisionUploadTab = () => {
             // ↓↓↓ 여기에 현재 사용 중이신 GAS 웹 앱 URL을 다시 넣어주세요 ↓↓↓
             const GAS_WEB_APP_URL = "여기에_배포된_GAS_웹앱_URL_입력";
             // ↑↑↑================================================================↑↑↑
@@ -161,14 +161,14 @@ const AIVisionUploadTab = () => {
                 reader.onerror = error => reject(error);
             });
 
-            // AI 분석 요청 핸들러
+            // AI 분석 요청 핸들러 (기존 로직 유지, JSON 파싱 에러 방지 강화)
             const handleAnalyze = async () => {
                 if (!images.summary) {
                     setErrorMsg("스코어카드 요약 사진은 필수입니다.");
                     return;
                 }
                 setIsAnalyzing(true);
-                setResultMsg("AI가 이미지를 판독하고 있습니다... (약 10초 소요)");
+                setResultMsg("AI가 이미지를 판독하고 있습니다... (약 10~15초 소요)");
                 setErrorMsg("");
                 setAnalyzedData(null);
 
@@ -188,7 +188,14 @@ const AIVisionUploadTab = () => {
                         body: JSON.stringify({ action: "analyze", images: payloadImages })
                     });
 
-                    const result = await response.json();
+                    // JSON 파싱 전 텍스트로 먼저 받아 오류 방지
+                    const textResult = await response.text();
+                    
+                    if (!textResult) {
+                        throw new Error("서버로부터 응답이 없습니다.");
+                    }
+
+                    const result = JSON.parse(textResult);
 
                     if (result.success) {
                         const parsedData = result.data;
@@ -200,7 +207,7 @@ const AIVisionUploadTab = () => {
                         setAnalyzedData(parsedData); 
                         setResultMsg("✅ 분석 완료! 아래 테이블을 검수 및 수정 후 저장해주세요.");
                     } else {
-                        throw new Error(result.error);
+                        throw new Error(result.error || "분석 중 오류가 발생했습니다.");
                     }
                 } catch (err) {
                     console.error(err);
@@ -211,7 +218,6 @@ const AIVisionUploadTab = () => {
                 }
             };
 
-            // 직접 입력(수동 모드) 생성 핸들러
             const handleManualInput = () => {
                 const blankData = {
                     date: "", time: "", course: "", frontNineName: "", backNineName: "",
@@ -232,14 +238,13 @@ const AIVisionUploadTab = () => {
                 setErrorMsg("");
             };
 
-            // ★ [추가됨] 전/후반 스코어 전체 스왑 핸들러
+            // ★ 전/후반 스코어 스왑 로직 
             const handleSwapNines = () => {
                 if (!confirm("전반 코스와 후반 코스의 모든 기록을 서로 바꾸시겠습니까?")) return;
                 
                 setAnalyzedData(prev => {
                     if (!prev) return prev;
 
-                    // 18홀 배열의 전반(0~8)과 후반(9~17)을 뒤바꾸는 헬퍼 함수
                     const swapArray = (arr) => {
                         if (!arr || arr.length < 18) return Array(18).fill("");
                         const newArr = [...arr];
@@ -368,9 +373,9 @@ const AIVisionUploadTab = () => {
                             </div>
 
                             {errorMsg && (
-                                <div className="p-4 bg-red-50 text-red-600 rounded-xl text-sm font-bold flex items-center gap-2 border border-red-100">
+                                <div className="p-4 bg-red-50 text-red-600 rounded-xl text-sm font-bold flex items-center gap-2 border border-red-100 break-words">
                                     <LucideIcon name="alert-circle" className="w-5 h-5 shrink-0" />
-                                    {errorMsg}
+                                    <span className="flex-1">{errorMsg}</span>
                                 </div>
                             )}
                             
@@ -492,7 +497,6 @@ const AIVisionUploadTab = () => {
                                         </table>
                                     </div>
                                     
-                                    {/* ★ [수정됨] 안내 문구와 스왑 버튼을 한 줄에 배치 */}
                                     <div className="flex justify-between items-center mt-3 mb-1">
                                         <p className="text-xs text-gray-400 flex items-center gap-1">
                                             <LucideIcon name="info" className="w-4 h-4" />
